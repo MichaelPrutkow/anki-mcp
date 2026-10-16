@@ -38,15 +38,30 @@ async def overview(
     """The decks with their card counts and the note types with their exact field names. Call it before drafting."""
     a = app(ctx)
     ids: dict[str, int] = await a.anki.invoke("deckNamesAndIds")
+    note = ""
     if deck:
-        ids = {n: i for n, i in ids.items() if n == deck or n.startswith(deck + "::")}
-        if not ids:
-            raise ToolError(f"There is no deck '{deck}'.")
+        want = deck.strip().strip(":").lower()
+        # Every deck whose name contains it, anywhere in the tree: "GDB" finds "TUM::GDB" and its subdecks,
+        # "Analysis" finds "Math::Analysis" and "TUM::Analysis 1".
+        matches = {n: i for n, i in ids.items() if want in n.lower()}
+        if not any(n.lower() == want or n.lower().endswith("::" + want) for n in matches):
+            note = f"No deck is named '{deck}'."
+        if not matches:
+            # Never fail here: an error makes Claude guess deck names again and again. Show what exists instead.
+            note += f" These are all decks: pick one, or draft_add creates '{deck}' ('Parent::{deck}' for a subdeck)."
+            matches = ids
+        elif note:
+            note += f" These decks contain '{deck}' in their name:"
+        ids = matches
     # getDeckStats is keyed by deck id and counts only the deck itself, without its subdecks.
-    stats: dict[str, Any] = await a.anki.invoke("getDeckStats", decks=list(ids))
-    by_name = {name: stats.get(str(deck_id), {}) for name, deck_id in ids.items()}
+    # One call per deck: Anki hides an empty "Default" deck from its tree, and that must not fail everything.
+    results = await a.anki.multi([("getDeckStats", {"decks": [name]}) for name in ids])
+    by_name: dict[str, Any] = {}
+    for name, deck_id, result in zip(ids, ids.values(), results, strict=True):
+        by_name[name] = {} if isinstance(result, AnkiError) else result.get(str(deck_id), {})
 
-    lines = ["Decks (full name: cards including subdecks, due today, new today):"]
+    lines = [note, ""] if note else []
+    lines.append("Decks (full name: cards including subdecks, due today, new today):")
     empty: list[str] = []
     for name in sorted(by_name, key=str.lower):
         total = sum(s.get("total_in_deck", 0) for n, s in by_name.items() if n == name or n.startswith(name + "::"))

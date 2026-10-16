@@ -56,6 +56,26 @@ async def test_overview_lists_decks_and_note_types(client: Client, anki: FakeAnk
     assert "Image Occlusion [image occlusion]: Occlusion | Image | Header | Back Extra | Comments" in text
 
 
+async def test_overview_finds_a_deck_by_its_short_name(client: Client, anki: FakeAnki) -> None:
+    anki.decks |= {"TUM::GDB": 10, "TUM::GDB::Übung": 11, "TUM::Analysis 1": 12}
+    text = await call(client, "overview", deck="gdb")
+    assert "TUM::GDB" in text and "TUM::GDB::Übung" in text
+    assert "Analysis" not in text and "No deck" not in text
+
+
+async def test_overview_never_fails_on_an_unknown_deck(client: Client, anki: FakeAnki) -> None:
+    anki.decks |= {"TUM::Analysis 1": 12}
+    text = await call(client, "overview", deck="Analysis")
+    assert "No deck" not in text and "TUM::Analysis 1" in text and "Math::Analysis" in text
+
+    text = await call(client, "overview", deck="analy")
+    assert "No deck is named 'analy'. These decks contain" in text and "TUM::Analysis 1" in text
+
+    text = await call(client, "overview", deck="Datenbanken")
+    assert "These are all decks" in text and "TUM::Analysis 1" in text and "Math::Analysis" in text
+    assert "Basic [basic]: Front | Back" in text
+
+
 async def test_draft_edit_and_commit_in_steps(client: Client, anki: FakeAnki) -> None:
     text = await call(client, "draft_add", cards=[BASIC, CLOZE], deck="Math::Analysis", note_type="Basic")
     draft = draft_id(text)
