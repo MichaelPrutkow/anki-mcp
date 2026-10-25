@@ -193,6 +193,25 @@ def _warnings(cards: list[DraftCard], note_types: dict[str, NoteType]) -> list[s
     return lines
 
 
+# Topics that exams usually show as a drawing. German compounds ("Binärbaum", "Zustandsdiagramm") match too.
+_DRAWN = re.compile(
+    r"(?<!para)(?<!photo)graph|\b[bd]fs\b|dijkstra|kruskal|prim's|\bheap|baum|\btrees?\b|\bavl\b|rot-schwarz|"
+    r"red-black|automat|\b[dn]fa\b|\bnea\b|\bdea\b|state machine|zustands|schaltung|circuit|petri|\buml\b|"
+    r"diagram|\bplot|skizz|sketch",
+    re.IGNORECASE,
+)
+
+
+def _picture_hints(cards: list[DraftCard]) -> list[str]:
+    """Text cards about something usually drawn. Claude rarely thinks of pictures unless reminded on the spot."""
+    hints = []
+    for card in cards:
+        text = " ".join(card.fields.values())
+        if "<img" not in text and (match := _DRAWN.search(strip_html(text))):
+            hints.append(f"#{card.n} ({match[0].lower()})")
+    return hints
+
+
 # --- how cards look in the chat ------------------------------------------------------
 
 
@@ -317,6 +336,12 @@ async def draft_add(
     warnings = _warnings(new, {nt.name: nt for nt in await a.note_types.all()})
     if warnings:
         lines += ["Possible formatting problems, fix the real ones with draft_edit:", *warnings]
+    hints = _picture_hints(new)
+    if hints:
+        lines.append(
+            "Cards about something usually drawn, without a picture: " + ", ".join(hints) + ". If the exam shows it "
+            "as a drawing, add one before showing the cards (visuals skill: render_graph, pdf_figures, occlusion)."
+        )
     return "\n\n".join(["\n".join(lines), *await _cards_text(a, draft, new), NEXT_STEP])
 
 

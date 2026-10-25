@@ -13,17 +13,18 @@ If `overview` and the other anki tools are not among your tools, call `get_devic
 
 1. **Read the source** and decide what is worth remembering (see below). Read a YouTube video with `youtube_transcript`.
 2. **Call `overview`** once per conversation. Use deck names and field names exactly as it lists them. If the target deck already has cards on the topic, check with `search_notes` so you do not write near-duplicates.
-3. **Write the cards** by the rules below, then go through the checklist at the end. Rewrite or drop every card that fails.
+3. **Write the cards** by the rules below, then go through the checklist at the end. Rewrite or drop every card that fails. Decide for each card whether a picture carries it better (see below); if so, make the picture first, so the card goes into the draft with it.
 4. **Call `draft_add`** with up to 50 cards; for more, call it again with the returned `draft_id`. It checks the cards against Anki and keeps them in a draft. Nothing reaches Anki yet.
    - If it reports errors, nothing was added. Fix them and send all cards again.
    - If it reports formatting warnings, fix the real ones with `draft_edit`.
+   - If it lists cards about something usually drawn, add the picture for every one the lecture or exam shows as a drawing.
 5. **Show the cards** to the user in the chat: every card with all its fields, word for word as `draft_add` returned them, one block per card with its number. Do not summarize, shorten or paraphrase them; the user approves the exact text. Pictures appear as `[image: name.png]`: say once which folder they are in, so the user can open them. If you left out parts of the source on purpose, say which in one sentence. Then ask whether to add the cards or what to change.
 6. **Apply the user's changes** with `draft_edit`: the card number and only the fields that change, or `remove` for a rejected card. Show the changed cards again.
 7. **Call `draft_commit`** only after the user has said yes. Pass `cards` if they approved only some. Then report in one or two sentences how many cards went into which deck, and the batch id: `undo` with it removes them again. If the user studies on their phone, offer `sync`.
 
 Drafts are kept on the user's computer for 14 days. `draft_show` without an id lists them, so a draft can be continued in a later chat.
 
-If a card is about something drawn (a graph, tree, automaton, plot, diagram or labelled figure), read the `visuals` skill before writing it.
+If the lecture or exam shows something as a drawing (a graph, tree, heap, automaton, circuit, plot, diagram or labelled figure), the card shows a drawing too. Read the `visuals` skill before writing such a card. A PDF with figures is a hint to call `pdf_figures` on its pages.
 
 ## What deserves a card
 

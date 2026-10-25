@@ -44,19 +44,22 @@ cards, from your own material, and keeps fixing the ones that don't stick.
 - Your review history decides what gets fixed. `stats` ranks notes by again rate, lapses, FSRS
   difficulty, answer time, leeches and red flags. Flag a card red on your phone and Claude picks
   it up next time.
-- A whole course in one go. `/anki:exam-prep` gives every source its own agent, so 200 pages of
-  slides never touch your context. You approve a topic blueprint weighted by past exams, the cards
-  get written in parallel, audited, and approved topic by topic.
+- A whole course in one go, only when you start it with `/anki:exam-prep`. You approve a topic
+  blueprint weighted by past exams, then the cards get written, illustrated, audited and approved
+  topic by topic. Small courses run without agents; large ones use at most three at a time, and
+  Claude tells you how many before it starts them, so one course doesn't eat your usage limits.
 - Everything is undoable. Every commit and edit returns a batch id, `undo` reverts it.
 
 ## Setup
 
 You need:
 
-- **Anki 23.10+** with [AnkiConnect](https://ankiweb.net/shared/info/2055492159):
-  *Tools → Add-ons → Get Add-ons*, code `2055492159`, restart Anki.
-- **[uv](https://docs.astral.sh/uv/)**: `brew install uv`, or see the
-  [install guide](https://docs.astral.sh/uv/getting-started/installation/).
+- **macOS or Linux.** Windows isn't supported yet.
+- **Anki 25.07+** with [AnkiConnect](https://ankiweb.net/shared/info/2055492159):
+  *Tools → Add-ons → Get Add-ons*, code `2055492159`, restart Anki. The server runs on the Python
+  that Anki brings along, so there's nothing else to install. With an older Anki (23.10+), install
+  [uv](https://docs.astral.sh/uv/getting-started/installation/) (`brew install uv`); if uv is
+  there, the server uses it.
 - **Claude Code** or the **Claude desktop app**.
 - Optional: **[Graphviz](https://graphviz.org/download/)** for graphs, trees and automata
   (`brew install graphviz`).
@@ -71,7 +74,8 @@ You need:
 **Desktop app:** *Customize → Plugins → Add → Add marketplace*, enter
 `MichaelPrutkow/anki-for-claude`, install **Anki Flashcards**.
 
-Then say *"check my Anki setup"*. First start takes a few seconds while uv pulls the dependencies.
+Then say *"check my Anki setup"*. The first start takes a few seconds up to a minute while the
+dependencies download (pinned versions from PyPI, into the plugin's data folder).
 
 In the desktop app, add a folder to the chat before your first message (your lecture folder, for
 example). The server runs on your machine, and without a folder the chat doesn't reliably reach
@@ -159,6 +163,8 @@ Runs on your machine. Nothing is sent to me.
 - **Only when you ask:** the video id goes to YouTube for a transcript, an image URL you want on a
   card gets fetched, and Anki syncs your collection to AnkiWeb.
 - **Programs it starts:** Anki if it's closed (macOS), and Graphviz's `dot` for graphs.
+- **First start:** uv, or without uv Anki's own Python with pip, downloads the pinned dependencies
+  from PyPI (`requirements.txt`, checked by hash).
 
 Full policy: [PRIVACY.md](PRIVACY.md).
 
@@ -167,7 +173,8 @@ Full policy: [PRIVACY.md](PRIVACY.md).
 - An open dialog in Anki blocks AnkiConnect. Every call times out until you close it.
 - Claude Code and Cowork only. The server runs locally, so a plain chat (including claude.ai in
   the browser) can't reach it.
-- Anki auto-starts on macOS only. On Windows and Linux, open it yourself.
+- Anki auto-starts on macOS only. On Linux, open it yourself.
+- No Windows yet: the plugin starts its server with a shell script.
 - Duplicates work like in Anki: only the first field is compared.
 - Deleting can't be undone. Fix a card instead.
 - Image occlusion is rectangles only. Masks by label need a PDF text layer or a Graphviz graph,
@@ -202,6 +209,8 @@ uv sync --no-dev
 ```bash
 uv sync
 uv run pytest            # tools against an in-memory fake of AnkiConnect, no Anki needed
+uv export --frozen --no-dev --no-emit-project --format requirements-txt --quiet > requirements.txt
+                         # after changing dependencies: the launcher installs from it without uv
 claude plugin eval .     # Claude with the plugin vs. without it, against mocked tools
 claude --plugin-dir .    # try it in Claude Code
 ```

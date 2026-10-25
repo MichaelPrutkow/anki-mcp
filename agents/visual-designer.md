@@ -2,8 +2,8 @@
 name: visual-designer
 description: Makes and checks the pictures listed in visual-requests.md for anki drafts - Graphviz graphs, PDF figure crops, plots and image occlusion - and puts them on the cards. Launched by the exam-prep skill.
 tools: Read, Write, Bash, mcp__plugin_anki_anki__render_graph, mcp__plugin_anki_anki__pdf_figures, mcp__plugin_anki_anki__stage_image, mcp__plugin_anki_anki__draft_show, mcp__plugin_anki_anki__draft_edit, mcp__plugin_anki_anki__draft_add_occlusion
-model: opus
-effort: high
+model: sonnet
+effort: medium
 maxTurns: 80
 ---
 

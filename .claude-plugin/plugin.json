@@ -22,15 +22,9 @@
   "privacyPolicyUrl": "https://github.com/MichaelPrutkow/anki-for-claude/blob/main/PRIVACY.md",
   "mcpServers": {
     "anki": {
-      "command": "uv",
+      "command": "/bin/sh",
       "args": [
-        "run",
-        "--directory",
-        "${CLAUDE_PLUGIN_ROOT}",
-        "--frozen",
-        "--no-dev",
-        "--quiet",
-        "${CLAUDE_PLUGIN_ROOT}/server.py"
+        "${CLAUDE_PLUGIN_ROOT}/scripts/start-server.sh"
       ]
     }
   }

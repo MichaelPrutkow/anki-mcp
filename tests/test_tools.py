@@ -138,6 +138,15 @@ async def test_formatting_slips_are_reported(client: Client) -> None:
     assert "#1 Front: LaTeX outside \\( \\): 'D_{C,B}?'" in text
 
 
+async def test_cards_about_drawn_topics_get_a_picture_hint(client: Client) -> None:
+    dfs = {"fields": {"Front": "Welchen Knoten besucht DFS ab A als zweiten?", "Back": "B"}}
+    paragraph = {"fields": {"Front": "Was ist ein Paragraph?", "Back": "Ein Absatz"}}
+    text = await call(client, "draft_add", cards=[dfs, paragraph], deck="Math", note_type="Basic")
+    assert "usually drawn, without a picture: #1 (dfs)." in text
+    text = await call(client, "draft_add", cards=[paragraph], deck="Math", note_type="Basic")
+    assert "usually drawn" not in text
+
+
 async def test_failed_card_stays_in_draft(client: Client, anki: FakeAnki) -> None:
     text = await call(
         client, "draft_add", cards=[BASIC, {"fields": {"Front": "other", "Back": "b"}}], deck="Math", note_type="Basic"

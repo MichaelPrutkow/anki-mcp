@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
+import tomllib
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -113,7 +114,16 @@ class AnkiServer(MCPServer):
         return [t.model_copy(update={"input_schema": inline_refs(t.input_schema)}) for t in await super().list_tools()]
 
 
-mcp = AnkiServer("anki", version=version("anki-for-claude"), instructions=INSTRUCTIONS, lifespan=lifespan)
+def _version() -> str:
+    try:
+        return version("anki-for-claude")
+    except PackageNotFoundError:
+        # Started from the source folder with Anki's Python (scripts/start-server.sh), not installed by uv.
+        with (Path(__file__).parents[2] / "pyproject.toml").open("rb") as f:
+            return tomllib.load(f)["project"]["version"]
+
+
+mcp = AnkiServer("anki", version=_version(), instructions=INSTRUCTIONS, lifespan=lifespan)
 
 
 def tool(title: str, annotations: ToolAnnotations):
