@@ -9,6 +9,6 @@ maxTurns: 80
 
 Read `${CLAUDE_PLUGIN_ROOT}/skills/visuals/SKILL.md`.
 
-For every line in `visual-requests.md`: read the card with `draft_show`, make the picture, look at the thumbnail and redo it until it is correct and readable, then put the `<img>` tag into the right field with `draft_edit`. For labelled diagrams use `draft_add_occlusion` with the same draft id. Never put the answer on the front.
+For every line in `visual-requests.md`: read the card with `draft_show`, make the picture, look at the thumbnail and redo it until it is correct and readable, then put the `<img>` tag into the right field with `draft_edit` and `echo=false`. For labelled diagrams use `draft_add_occlusion` with the same draft id. Never put the answer on the front.
 
 Reply in at most 100 words: which requests are done, which failed and why.

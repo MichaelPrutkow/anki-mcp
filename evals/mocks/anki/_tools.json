@@ -177,7 +177,7 @@
   {
    "name": "search_notes",
    "title": "Search notes",
-   "description": "Find notes with Anki's search syntax. One line per note, newest first.",
+   "description": "Find notes with Anki's search syntax. One line per note, newest first, or all of them into a Markdown file.",
    "inputSchema": {
     "properties": {
      "query": {
@@ -215,6 +215,19 @@
       "minimum": 20,
       "title": "Max Chars",
       "type": "integer"
+     },
+     "save_to": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Instead of listing: write every match (up to 2000) in full as Markdown to this file, an absolute path ending in .md, e.g. for notes or a summary",
+      "title": "Save To"
      }
     },
     "required": [
@@ -316,12 +329,18 @@
   {
    "name": "undo",
    "title": "Undo a batch",
-   "description": "Revert a draft_commit or update_notes by its batch id: added notes are deleted, changed fields restored.\n\nA note the user edited since is left alone.\n",
+   "description": "Revert a draft_commit, update_notes or math_css by its batch id: added notes are deleted, changed fields and\nstyling restored.\n\nNotes the user studied or edited since are left alone and listed.\n",
    "inputSchema": {
     "properties": {
      "batch_id": {
       "title": "Batch Id",
       "type": "string"
+     },
+     "force": {
+      "default": false,
+      "description": "Commits only: also delete notes studied or edited since, with their history. Ask first",
+      "title": "Force",
+      "type": "boolean"
      }
     },
     "required": [
@@ -333,6 +352,35 @@
    "annotations": {
     "readOnlyHint": false,
     "destructiveHint": true,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "math_css",
+   "title": "Let long formulas scroll on phones",
+   "description": "Add CSS to note types so that a display formula wider than the screen scrolls sideways on a phone instead\nof running off the card. Only their styling changes. Returns a batch id for undo.",
+   "inputSchema": {
+    "properties": {
+     "note_types": {
+      "description": "Note types to style, e.g. ['Basic', 'Cloze']",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "title": "Note Types",
+      "type": "array"
+     }
+    },
+    "required": [
+     "note_types"
+    ],
+    "title": "math_cssArguments",
+    "type": "object"
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
     "idempotentHint": true,
     "openWorldHint": false
    }
@@ -354,67 +402,127 @@
    }
   },
   {
+   "name": "stats",
+   "title": "Study statistics",
+   "description": "How the collection is doing, and the notes the user struggles with most.\n\nHealth: card counts, reviews per day, true retention.\nWeak notes: ranked by again rate, lapses and FSRS difficulty, with flags that hint at the cause.\n",
+   "inputSchema": {
+    "properties": {
+     "scope": {
+      "default": "",
+      "description": "Anki search that limits the cards, e.g. 'deck:GAD'",
+      "title": "Scope",
+      "type": "string"
+     },
+     "days": {
+      "default": 60,
+      "maximum": 365,
+      "minimum": 1,
+      "title": "Days",
+      "type": "integer"
+     },
+     "weak_limit": {
+      "default": 25,
+      "description": "How many weak notes to list; 0 for none",
+      "maximum": 100,
+      "minimum": 0,
+      "title": "Weak Limit",
+      "type": "integer"
+     }
+    },
+    "title": "statsArguments",
+    "type": "object"
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
    "name": "draft_add",
    "title": "Add cards to a draft",
-   "description": "Check cards against Anki and add them to a draft. Nothing is written to Anki.\n\nReturns the cards as text to show the user. If any card has a problem, none is added and every problem is listed.\n",
+   "description": "Check cards against Anki and add them to a draft. Nothing is written to Anki.\n\nPass 'cards', or 'cards_text' for cards with LaTeX. LaTeX that lost a backslash in JSON is repaired.\nReturns the cards as text to show the user (no HTML, &amp; shows as &). If any card has a problem,\nnone is added and every problem is listed.\n",
    "inputSchema": {
     "properties": {
      "cards": {
-      "items": {
-       "properties": {
-        "fields": {
-         "additionalProperties": {
-          "type": "string"
+      "anyOf": [
+       {
+        "items": {
+         "properties": {
+          "fields": {
+           "additionalProperties": {
+            "type": "string"
+           },
+           "description": "Field name -> content (HTML), names exactly as overview lists them",
+           "title": "Fields",
+           "type": "object"
+          },
+          "tags": {
+           "default": [],
+           "description": "Tags for this card, on top of the call's tags",
+           "items": {
+            "type": "string"
+           },
+           "title": "Tags",
+           "type": "array"
+          },
+          "note_type": {
+           "anyOf": [
+            {
+             "type": "string"
+            },
+            {
+             "type": "null"
+            }
+           ],
+           "default": null,
+           "description": "Only if it differs from the call's note type",
+           "title": "Note Type"
+          },
+          "deck": {
+           "anyOf": [
+            {
+             "type": "string"
+            },
+            {
+             "type": "null"
+            }
+           ],
+           "default": null,
+           "description": "Only if it differs from the call's deck",
+           "title": "Deck"
+          }
          },
-         "description": "Field name -> content (HTML), names exactly as overview lists them",
-         "title": "Fields",
+         "required": [
+          "fields"
+         ],
+         "title": "CardIn",
          "type": "object"
         },
-        "tags": {
-         "default": [],
-         "items": {
-          "type": "string"
-         },
-         "title": "Tags",
-         "type": "array"
-        },
-        "note_type": {
-         "anyOf": [
-          {
-           "type": "string"
-          },
-          {
-           "type": "null"
-          }
-         ],
-         "default": null,
-         "description": "Only if it differs from the draft's note type",
-         "title": "Note Type"
-        },
-        "deck": {
-         "anyOf": [
-          {
-           "type": "string"
-          },
-          {
-           "type": "null"
-          }
-         ],
-         "default": null,
-         "description": "Only if it differs from the draft's deck",
-         "title": "Deck"
-        }
+        "maxItems": 50,
+        "minItems": 1,
+        "type": "array"
        },
-       "required": [
-        "fields"
-       ],
-       "title": "CardIn",
-       "type": "object"
-      },
-      "maxItems": 50,
-      "minItems": 1,
-      "title": "Cards",
-      "type": "array"
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Cards"
+     },
+     "cards_text": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Instead of 'cards': the cards as plain text, where LaTeX needs no doubled backslashes. Each card starts with a line '## <note type>', optionally '| deck: <name> | tags: <a b>' after it ('##' alone: the call's note type). Then 'Field: content' lines; a field runs until the next field name or '##', its line breaks become <br>",
+      "title": "Cards Text"
      },
      "draft_id": {
       "anyOf": [
@@ -439,7 +547,7 @@
        }
       ],
       "default": null,
-      "description": "New draft: full deck name, e.g. 'Math::Analysis'",
+      "description": "Deck of these cards, full name, e.g. 'Math::Analysis'. A new draft needs it",
       "title": "Deck"
      },
      "note_type": {
@@ -452,7 +560,7 @@
        }
       ],
       "default": null,
-      "description": "New draft: note type, e.g. 'Basic'",
+      "description": "Note type of these cards, e.g. 'Basic'. A new draft needs it",
       "title": "Note Type"
      },
      "tags": {
@@ -468,7 +576,7 @@
        }
       ],
       "default": null,
-      "description": "New draft: tags for all its cards",
+      "description": "Tags for these cards. A new draft also gives them to later cards",
       "title": "Tags"
      },
      "title": {
@@ -481,7 +589,7 @@
        }
       ],
       "default": null,
-      "description": "New draft: a short name",
+      "description": "A short name for the draft",
       "title": "Title"
      },
      "allow_duplicate": {
@@ -489,11 +597,14 @@
       "description": "Allow cards whose first field already exists",
       "title": "Allow Duplicate",
       "type": "boolean"
+     },
+     "echo": {
+      "default": true,
+      "description": "false: reply with card numbers, repairs and warnings only, not the cards. For when the user said to add the cards without seeing them, or when nobody reads them",
+      "title": "Echo",
+      "type": "boolean"
      }
     },
-    "required": [
-     "cards"
-    ],
     "title": "draft_addArguments",
     "type": "object"
    },
@@ -628,7 +739,7 @@
        }
       ],
       "default": null,
-      "description": "New draft: tags for all its cards",
+      "description": "Tags for this card. A new draft also gives them to later cards",
       "title": "Tags"
      },
      "title": {
@@ -641,7 +752,7 @@
        }
       ],
       "default": null,
-      "description": "New draft: a short name",
+      "description": "A short name for the draft",
       "title": "Title"
      }
     },
@@ -662,7 +773,7 @@
   {
    "name": "draft_edit",
    "title": "Change cards in a draft",
-   "description": "Change or remove cards of a draft by number. Send only the fields that change; the others stay.\n\nReturns the changed cards as text to show the user.\n",
+   "description": "Change, move or remove cards of a draft by number, or find and replace across all its cards.\n\nSend only the fields that change; the others stay. Returns the changed cards as text to show the user.\n",
    "inputSchema": {
     "properties": {
      "draft_id": {
@@ -670,66 +781,164 @@
       "type": "string"
      },
      "edits": {
-      "items": {
-       "properties": {
-        "card": {
-         "description": "Card number in the draft, e.g. 3 for #3",
-         "title": "Card",
-         "type": "integer"
-        },
-        "fields": {
-         "anyOf": [
-          {
-           "additionalProperties": {
-            "type": "string"
-           },
-           "type": "object"
+      "anyOf": [
+       {
+        "items": {
+         "properties": {
+          "card": {
+           "description": "Card number in the draft, e.g. 3 for #3",
+           "title": "Card",
+           "type": "integer"
           },
-          {
-           "type": "null"
-          }
-         ],
-         "default": null,
-         "description": "Only the fields that change",
-         "title": "Fields"
-        },
-        "tags": {
-         "anyOf": [
-          {
-           "items": {
-            "type": "string"
-           },
-           "type": "array"
+          "fields": {
+           "anyOf": [
+            {
+             "additionalProperties": {
+              "type": "string"
+             },
+             "type": "object"
+            },
+            {
+             "type": "null"
+            }
+           ],
+           "default": null,
+           "description": "Only the fields that change",
+           "title": "Fields"
           },
-          {
-           "type": "null"
+          "tags": {
+           "anyOf": [
+            {
+             "items": {
+              "type": "string"
+             },
+             "type": "array"
+            },
+            {
+             "type": "null"
+            }
+           ],
+           "default": null,
+           "description": "Replaces all tags of the card",
+           "title": "Tags"
+          },
+          "deck": {
+           "anyOf": [
+            {
+             "type": "string"
+            },
+            {
+             "type": "null"
+            }
+           ],
+           "default": null,
+           "description": "Moves the card to this deck (full name)",
+           "title": "Deck"
+          },
+          "remove": {
+           "default": false,
+           "description": "Remove the card from the draft",
+           "title": "Remove",
+           "type": "boolean"
           }
+         },
+         "required": [
+          "card"
          ],
-         "default": null,
-         "description": "Replaces the card's tags",
-         "title": "Tags"
+         "title": "EditIn",
+         "type": "object"
         },
-        "remove": {
-         "default": false,
-         "description": "Remove the card from the draft",
-         "title": "Remove",
-         "type": "boolean"
-        }
+        "type": "array"
        },
-       "required": [
-        "card"
-       ],
-       "title": "EditIn",
-       "type": "object"
-      },
-      "minItems": 1,
-      "title": "Edits",
-      "type": "array"
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Changes card by card",
+      "title": "Edits"
+     },
+     "replace": {
+      "anyOf": [
+       {
+        "items": {
+         "properties": {
+          "find": {
+           "description": "Text to find; a Python regular expression with regex=true",
+           "minLength": 1,
+           "title": "Find",
+           "type": "string"
+          },
+          "replacement": {
+           "description": "What replaces it. With regex=true, \\1 and \\g<name> insert a group",
+           "title": "Replacement",
+           "type": "string"
+          },
+          "regex": {
+           "default": false,
+           "title": "Regex",
+           "type": "boolean"
+          },
+          "cards": {
+           "anyOf": [
+            {
+             "items": {
+              "type": "integer"
+             },
+             "type": "array"
+            },
+            {
+             "type": "null"
+            }
+           ],
+           "default": null,
+           "description": "Only these card numbers. Without it: every card",
+           "title": "Cards"
+          },
+          "fields": {
+           "anyOf": [
+            {
+             "items": {
+              "type": "string"
+             },
+             "type": "array"
+            },
+            {
+             "type": "null"
+            }
+           ],
+           "default": null,
+           "description": "Only these fields. Without it: every field",
+           "title": "Fields"
+          }
+         },
+         "required": [
+          "find",
+          "replacement"
+         ],
+         "title": "ReplaceIn",
+         "type": "object"
+        },
+        "maxItems": 20,
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Find and replace across the draft, applied before 'edits'",
+      "title": "Replace"
+     },
+     "echo": {
+      "default": true,
+      "description": "false: reply with card numbers and problems only, not the cards",
+      "title": "Echo",
+      "type": "boolean"
      }
     },
     "required": [
-     "draft_id",
-     "edits"
+     "draft_id"
     ],
     "title": "draft_editArguments",
     "type": "object"
@@ -829,47 +1038,9 @@
    }
   },
   {
-   "name": "stats",
-   "title": "Study statistics",
-   "description": "How the collection is doing, and the notes the user struggles with most.\n\nHealth: card counts, reviews per day, true retention.\nWeak notes: ranked by again rate, lapses and FSRS difficulty, with flags that hint at the cause.\n",
-   "inputSchema": {
-    "properties": {
-     "scope": {
-      "default": "",
-      "description": "Anki search that limits the cards, e.g. 'deck:GAD'",
-      "title": "Scope",
-      "type": "string"
-     },
-     "days": {
-      "default": 60,
-      "maximum": 365,
-      "minimum": 1,
-      "title": "Days",
-      "type": "integer"
-     },
-     "weak_limit": {
-      "default": 25,
-      "description": "How many weak notes to list; 0 for none",
-      "maximum": 100,
-      "minimum": 0,
-      "title": "Weak Limit",
-      "type": "integer"
-     }
-    },
-    "title": "statsArguments",
-    "type": "object"
-   },
-   "annotations": {
-    "readOnlyHint": true,
-    "destructiveHint": false,
-    "idempotentHint": true,
-    "openWorldHint": false
-   }
-  },
-  {
    "name": "youtube_transcript",
    "title": "YouTube transcript",
-   "description": "Read the transcript of a YouTube video.\n\nA long video returns a timestamped outline instead; call again with 'intervals' to read the parts that matter.\n",
+   "description": "Read the transcript of a YouTube video, in the video's own language unless another is asked for.\n\nA long video returns a timestamped outline instead; call again with 'intervals' to read the parts that matter.\n",
    "inputSchema": {
     "properties": {
      "url": {
@@ -910,11 +1081,18 @@
       "title": "Intervals"
      },
      "language": {
-      "default": "en",
-      "description": "Transcript language code, e.g. 'de'",
-      "minLength": 2,
-      "title": "Language",
-      "type": "string"
+      "anyOf": [
+       {
+        "minLength": 2,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Language code, e.g. 'de'. Without it: the video's own language",
+      "title": "Language"
      }
     },
     "required": [

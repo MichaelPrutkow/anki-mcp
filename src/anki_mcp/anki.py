@@ -1,6 +1,8 @@
 import asyncio
+import difflib
 import sys
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -87,6 +89,25 @@ class AnkiClient:
             return True
         except (httpx.HTTPError, AnkiError):
             return False
+
+
+def similar_decks(name: str, decks: Iterable[str]) -> list[str]:
+    """Existing decks a missing deck name probably means: the same last part ('3 Semester::GDB' -> 'GDB'),
+    or a close spelling."""
+    want = name.strip().strip(":").lower()
+    leaf = want.rsplit("::", 1)[-1]
+    by_lower = {d.lower(): d for d in decks if d.lower() != want}
+    same_leaf = sorted((d for low, d in by_lower.items() if low.rsplit("::", 1)[-1] == leaf), key=len)
+    if same_leaf:
+        return same_leaf[:3]
+    return [by_lower[d] for d in difflib.get_close_matches(want, list(by_lower), n=3, cutoff=0.75)]
+
+
+def deck_query(name: str) -> str:
+    """Anki search for a deck and its subdecks. Quoted and escaped, so spaces, '_' and '*' mean themselves."""
+    for char in ("\\", '"', "*", "_"):
+        name = name.replace(char, "\\" + char)
+    return f'"deck:{name}"'
 
 
 def _unwrap(action: str, body: Any) -> Any:

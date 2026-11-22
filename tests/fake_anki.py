@@ -30,7 +30,11 @@ class FakeAnki:
         self.decks = {"Default": 1, "Math": 2, "Math::Analysis": 3}
         self.notes: dict[int, dict[str, Any]] = {}
         self.media: dict[str, bytes] = {}
-        self._next_id = 1000
+        self.css = {m["name"]: ".card { font-size: 20px; }" for m in MODELS}
+        self.weak_cards: list[int] = []  # what findCards returns for the weak-card search of stats
+        self.clearest_cards: list[int] = []  # ... and for the search of cards failed lately, leeches and red flags
+        self.clock = 1_760_000_000  # seconds; note ids are the time a note was added, in milliseconds
+        self._added = 0
 
     def transport(self) -> httpx.MockTransport:
         def handle(request: httpx.Request) -> httpx.Response:
@@ -101,19 +105,21 @@ class FakeAnki:
         self._validate(note)
         if note["deckName"] not in self.decks:
             raise ValueError("deck was not found")
-        self._next_id += 1
+        self._added += 1
+        nid = self.clock * 1000 + self._added
         model = next(m for m in MODELS if m["name"] == note["modelName"])
-        self.notes[self._next_id] = {
-            "noteId": self._next_id,
+        self.notes[nid] = {
+            "noteId": nid,
             "modelName": note["modelName"],
             "deck": note["deckName"],
             "tags": list(note.get("tags", [])),
             "fields": {
                 f["name"]: {"value": note["fields"].get(f["name"], ""), "order": f["ord"]} for f in model["flds"]
             },
-            "mod": 1,
+            "mod": self.clock,
+            "studied": False,  # not AnkiConnect's: whether a card of the note has left the new queue
         }
-        return self._next_id
+        return nid
 
     def notesInfo(self, notes: list[int]) -> list[dict[str, Any]]:
         return [json.loads(json.dumps(self.notes[n])) if n in self.notes else {} for n in notes]
@@ -122,20 +128,27 @@ class FakeAnki:
         stored = self.notes[note["id"]]
         for name, value in note["fields"].items():
             stored["fields"][name]["value"] = value
-        stored["mod"] += 1
+        stored["mod"] = self.clock
 
     def deleteNotes(self, notes: list[int]) -> None:
         for n in notes:
             self.notes.pop(n, None)
 
     def findNotes(self, query: str) -> list[int]:
-        if m := re.fullmatch(r"tag:(\S+)", query):
-            return [n for n, note in self.notes.items() if m[1] in note["tags"]]
+        if m := re.fullmatch(r"tag:(\S+)( -is:new)?", query):
+            return [n for n, note in self.notes.items() if m[1] in note["tags"] and (note["studied"] or not m[2])]
         if m := re.fullmatch(r"nid:([\d,]+)", query):
             return [int(n) for n in m[1].split(",") if int(n) in self.notes]
-        if m := re.fullmatch(r"deck:(\S+)", query):
-            return [n for n, note in self.notes.items() if note["deck"] == m[1]]
+        if m := re.fullmatch(r'deck:(\S+)|"deck:((?:[^"\\]|\\.)*)"', query):
+            deck = m[1] or re.sub(r"\\(.)", r"\1", m[2])
+            return [n for n, note in self.notes.items() if note["deck"] == deck or note["deck"].startswith(deck + "::")]
         return list(self.notes)
+
+    def modelStyling(self, modelName: str) -> dict[str, str]:
+        return {"css": self.css[modelName]}
+
+    def updateModelStyling(self, model: dict[str, str]) -> None:
+        self.css[model["name"]] = model["css"]
 
     def storeMediaFile(self, filename: str, data: str, deleteExisting: bool = True) -> str:
         content = base64.b64decode(data)
@@ -145,7 +158,18 @@ class FakeAnki:
         return filename
 
     def findCards(self, query: str) -> list[int]:
+        if "prop:lapses>=3" in query:
+            return list(self.weak_cards)
+        if "-is:new -is:suspended (rated:" in query:
+            return list(self.clearest_cards)
         return []
+
+    def cardsInfo(self, cards: list[int]) -> list[dict[str, Any]]:
+        fields = {"Front": {"value": "Frage", "order": 0}, "Back": {"value": "Antwort", "order": 1}}
+        return [{"cardId": c, "note": c, "ord": 0, "lapses": 1, "modelName": "Basic", "fields": fields} for c in cards]
+
+    def getReviewsOfCards(self, cards: list[int]) -> dict[str, list[dict[str, Any]]]:
+        return {}
 
     def sync(self) -> None:
         return None

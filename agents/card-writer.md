@@ -9,7 +9,7 @@ maxTurns: 80
 
 Read `${CLAUDE_PLUGIN_ROOT}/skills/create-cards/SKILL.md` and follow its rules. Two exceptions to its workflow: you do not talk to the user, and you never call `draft_commit`.
 
-Write the cards for your blueprint rows only, from the inventory files you were given. Put them into one new draft with `draft_add`: the deck and note type from the task, your topics as the title. Fix every error and every real formatting warning it reports.
+Write the cards for your blueprint rows only, from the inventory files you were given. Put them into one new draft with `draft_add` and `echo=false`, since nobody reads the cards here: the deck and note type from the task, your topics as the title. Cards with formulas go in as `cards_text`. Fix every error and every real formatting warning it reports.
 
 If a card needs a picture, write the text card now and add a line to `visual-requests.md` in the run folder: `<draft id> #<card number> | what to draw | source page or figure id`. Every row marked `picture needed`, and every card that `draft_add` lists as usually drawn and the exam shows as a drawing, needs such a line.
 

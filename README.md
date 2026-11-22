@@ -37,7 +37,8 @@ cards, from your own material, and keeps fixing the ones that don't stick.
   clozes), and a theorem gets separate cards for statement, hypotheses and key idea. The wording
   rules come from [Wikipedia: Signs of AI writing](https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing),
   so the cards don't read like an LLM wrote them.
-- You see every card word for word before it's added. Tell Claude what to change, approve, done.
+- You see every card word for word before it's added. Tell Claude what to change, approve, done. Or say
+  *"commit them directly"*: Claude adds them without printing them, which saves tokens.
 - Real pictures. Graphs, trees and automata via Graphviz. Figures cut out of your PDF by their
   caption (*"Fig. 3.2"*). Plots via matplotlib. Native image occlusion, with masks placed from the
   PDF's text layer or the graph's node positions instead of guessed from pixels.
@@ -110,24 +111,31 @@ Claude picks the skill itself. The slash commands are there to force one.
 - Drafts are saved to disk, so they survive restarts. Every card is checked against your note
   types and for duplicates before you see it.
 - The tools catch the usual formatting slips: LaTeX outside `\( \)`, `$...$` math Anki won't
-  render, a `<` inside a formula, braces that close a cloze too early.
+  render, braces that close a cloze too early, unbalanced braces and environments, and every macro
+  Anki's MathJax doesn't know (`\and`, `\R`, `\abs`, ...), checked against the macro list of the
+  MathJax 3.2.2 that Anki ships.
+- They repair what JSON does to a single backslash (`\text` arrives as a tab and `ext`) and escape a
+  stray `<`. Cards with formulas can also go in as plain text (`cards_text`), where backslashes need
+  no escaping at all.
+- New cards that read almost like one already in the deck are flagged.
+- `math_css` lets long formulas scroll sideways on a phone instead of running off the card.
 - Pictures land in `~/Pictures/Anki for Claude`, so you can look at them while reviewing. Image
   occlusion cards also get a `<name>-masks.png` that shows the masks.
 - The card rules live in a skill, so they cost nothing in chats that aren't about Anki.
 - Tool output is short plain text. Long YouTube videos come back as a timestamped outline, and
   Claude only pulls the parts it needs.
-- `undo` skips cards you edited yourself in the meantime. Cards the plugin didn't create can't be
-  deleted by it and are only edited after you agree.
+- `undo` leaves cards you studied or edited in the meantime alone, unless you tell it otherwise.
+  Cards the plugin didn't create can't be deleted by it and are only edited after you agree.
 
 ## Tools
 
 | Tool | Access | What it does |
 | --- | --- | --- |
 | `overview` | read | Decks, card counts, note types and their exact field names |
-| `search_notes` | read | Search with Anki's query syntax, one line per note |
+| `search_notes` | read | Search with Anki's query syntax, or write the matches into a Markdown file |
 | `draft_add` | draft | Check cards and add them to a draft |
 | `draft_add_occlusion` | draft | Image occlusion note, masks by label or region |
-| `draft_edit` | draft | Change or remove draft cards by number |
+| `draft_edit` | draft | Change, move or remove draft cards, or find and replace across a draft |
 | `draft_show` | read | Show a draft, or list the open ones |
 | `stage_image` | draft | Save an image, a PDF figure or part of a PDF page for a card |
 | `pdf_figures` | read | Find figures and their captions in a PDF |
@@ -136,7 +144,8 @@ Claude picks the skill itself. The slash commands are there to force one.
 | `youtube_transcript` | web | Transcript or outline of a YouTube video |
 | `draft_commit` | **write** | Add the approved cards, create missing decks |
 | `update_notes` | **write** | Fix cards without losing their review history |
-| `undo` | **write** | Revert a commit or an edit by its batch id |
+| `undo` | **write** | Revert a commit, an edit or `math_css` by its batch id |
+| `math_css` | **write** | Let long formulas scroll on phones (styling of the chosen note types) |
 | `delete_notes` | **write** | Delete notes this plugin created |
 | `sync` | **write** | Sync with AnkiWeb so the cards reach your phone |
 
@@ -175,7 +184,8 @@ Full policy: [PRIVACY.md](PRIVACY.md).
   the browser) can't reach it.
 - Anki auto-starts on macOS only. On Linux, open it yourself.
 - No Windows yet: the plugin starts its server with a shell script.
-- Duplicates work like in Anki: only the first field is compared.
+- Duplicates: Anki rejects exact copies of the first field. Near-copies are only flagged, and only
+  against the newest 1500 notes of the deck.
 - Deleting can't be undone. Fix a card instead.
 - Image occlusion is rectangles only. Masks by label need a PDF text layer or a Graphviz graph,
   otherwise Claude places them by region.
@@ -209,6 +219,10 @@ uv sync --no-dev
 ```bash
 uv sync
 uv run pytest            # tools against an in-memory fake of AnkiConnect, no Anki needed
+ANKI_LIVE=1 uv run pytest tests/test_live_anki.py
+                         # read-only smoke test against the real AnkiConnect, with Anki open
+node scripts/mathjax_names.js <mathjax-full@3.2.2> > src/anki_mcp/mathjax_names.py
+                         # when Anki ships another MathJax: the macros the lint accepts
 uv export --frozen --no-dev --no-emit-project --format requirements-txt --quiet > requirements.txt
                          # after changing dependencies: the launcher installs from it without uv
 claude plugin eval .     # Claude with the plugin vs. without it, against mocked tools

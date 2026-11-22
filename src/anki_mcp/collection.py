@@ -7,10 +7,18 @@ from uuid import uuid4
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import BaseModel, Field
 
-from anki_mcp.anki import AnkiError, AnkiTimeout
+from anki_mcp.anki import AnkiError, AnkiTimeout, similar_decks
 from anki_mcp.images import dot_command, local_images, replace_images, upload_images
-from anki_mcp.server import BATCH_PREFIX, CREATED_TAG, OVERWRITES, READ_ONLY, SYNC, Ctx, app, tool
-from anki_mcp.text import strip_html, truncate
+from anki_mcp.server import BATCH_PREFIX, CREATED_TAG, OVERWRITES, READ_ONLY, STYLES, SYNC, App, Ctx, app, tool
+from anki_mcp.text import lint, repair, strip_html, to_markdown, truncate
+
+MAX_EXPORT = 2000
+EXPORT_MARK = "<!-- Exported from Anki by anki-for-claude."
+EDIT_SLACK = 60  # seconds between adding a note and a change that counts as the user's edit
+
+
+def _count(n: int, word: str) -> str:
+    return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
 
 class Journal:
@@ -46,7 +54,10 @@ async def overview(
         matches = {n: i for n, i in ids.items() if want in n.lower()}
         if not any(n.lower() == want or n.lower().endswith("::" + want) for n in matches):
             note = f"No deck is named '{deck}'."
-        if not matches:
+        if not matches and (similar := similar_decks(deck, ids)):
+            note += " Did you mean " + " or ".join(f"'{s}'" for s in similar) + "?"
+            matches = {n: i for n, i in ids.items() if any(n == s or n.startswith(s + "::") for s in similar)}
+        elif not matches:
             # Never fail here: an error makes Claude guess deck names again and again. Show what exists instead.
             note += f" These are all decks: pick one, or draft_add creates '{deck}' ('Parent::{deck}' for a subdeck)."
             matches = ids
@@ -55,25 +66,32 @@ async def overview(
         ids = matches
     # getDeckStats is keyed by deck id and counts only the deck itself, without its subdecks.
     # One call per deck: Anki hides an empty "Default" deck from its tree, and that must not fail everything.
-    results = await a.anki.multi([("getDeckStats", {"decks": [name]}) for name in ids])
+    try:
+        results = await a.anki.multi([("getDeckStats", {"decks": [name]}) for name in ids])
+    except AnkiError as exc:
+        results = [exc] * len(ids)
     by_name: dict[str, Any] = {}
     for name, deck_id, result in zip(ids, ids.values(), results, strict=True):
-        by_name[name] = {} if isinstance(result, AnkiError) else result.get(str(deck_id), {})
+        by_name[name] = None if isinstance(result, AnkiError) else result.get(str(deck_id), {})
 
     lines = [note, ""] if note else []
-    lines.append("Decks (full name: cards including subdecks, due today, new today):")
-    empty: list[str] = []
-    for name in sorted(by_name, key=str.lower):
-        total = sum(s.get("total_in_deck", 0) for n, s in by_name.items() if n == name or n.startswith(name + "::"))
-        if total == 0:
-            if name != "Default":
-                empty.append(name)
-            continue
-        s = by_name[name]
-        due = s.get("learn_count", 0) + s.get("review_count", 0)
-        lines.append(f"{name}: {total} cards, {due} due, {s.get('new_count', 0)} new")
-    if empty:
-        lines.append("Empty decks: " + ", ".join(empty))
+    if all(stats is None for stats in by_name.values()):
+        lines.append("Decks (AnkiConnect gave no card counts): " + ", ".join(sorted(by_name, key=str.lower)))
+    else:
+        lines.append("Decks (full name: cards including subdecks, due today, new today):")
+        empty: list[str] = []
+        for name in sorted(by_name, key=str.lower):
+            tree = [s or {} for n, s in by_name.items() if n == name or n.startswith(name + "::")]
+            total = sum(s.get("total_in_deck", 0) for s in tree)
+            if total == 0:
+                if name != "Default":
+                    empty.append(name)
+                continue
+            s = by_name[name] or {}
+            due = s.get("learn_count", 0) + s.get("review_count", 0)
+            lines.append(f"{name}: {total} cards, {due} due, {s.get('new_count', 0)} new")
+        if empty:
+            lines.append("Empty decks: " + ", ".join(empty))
 
     lines += ["", "Note types (name [kind]: fields in order):"]
     for nt in sorted(await a.note_types.all(), key=lambda n: n.name.lower()):
@@ -90,12 +108,21 @@ async def search_notes(
     limit: Annotated[int, Field(ge=1, le=100)] = 20,
     fields: Annotated[list[str] | None, Field(description="Only show these fields")] = None,
     max_chars: Annotated[int, Field(ge=20, le=2000, description="Characters shown per field")] = 120,
+    save_to: Annotated[
+        str | None,
+        Field(
+            description="Instead of listing: write every match (up to 2000) in full as Markdown to this file, "
+            "an absolute path ending in .md, e.g. for notes or a summary"
+        ),
+    ] = None,
 ) -> str:
-    """Find notes with Anki's search syntax. One line per note, newest first."""
+    """Find notes with Anki's search syntax. One line per note, newest first, or all of them into a Markdown file."""
     a = app(ctx)
     ids = sorted(await a.anki.invoke("findNotes", query=query), reverse=True)
     if not ids:
         return f"No notes match '{query}'. If you expected hits, check the search syntax."
+    if save_to:
+        return await _export(a, query, ids, save_to)
 
     shown = ids[:limit]
     wanted = {f.lower() for f in fields} if fields else None
@@ -114,6 +141,45 @@ async def search_notes(
             line += " | tags: " + " ".join(tags)
         lines.append(line)
     return "\n".join(lines)
+
+
+def _export_path(save_to: str) -> Path:
+    path = Path(save_to).expanduser()
+    if not path.is_absolute() or path.suffix.lower() != ".md":
+        raise ToolError(f"'{save_to}': save_to needs an absolute path on the user's computer ending in .md.")
+    if not path.parent.is_dir():
+        raise ToolError(f"The folder {path.parent} does not exist.")
+    if path.exists() and not path.read_text(encoding="utf-8", errors="replace").startswith(EXPORT_MARK):
+        raise ToolError(f"{path} exists and was not written by this tool. Pick another file name.")
+    return path
+
+
+async def _export(a: App, query: str, ids: list[int], save_to: str) -> str:
+    """All matching notes in full, as Markdown, oldest first: the order in which they were added."""
+    path = _export_path(save_to)
+    chosen = sorted(ids)[:MAX_EXPORT]
+    lines = [f"{EXPORT_MARK} Search: {query} -->", ""]
+    for number, info in enumerate(await a.anki.invoke("notesInfo", notes=chosen), start=1):
+        if not info:
+            continue
+        nt = await a.note_types.get(info["modelName"])
+        hidden = (nt.io_fields or {}).get("occlusion")  # the masks of an image occlusion note are not text
+        lines += [f"## {number}", ""]
+        for name, field in sorted(info["fields"].items(), key=lambda kv: kv[1]["order"]):
+            if field["value"].strip() and name != hidden:
+                lines += [f"**{name}:** {to_markdown(field['value'])}", ""]
+        tags = [t for t in info["tags"] if t != CREATED_TAG and not t.startswith(BATCH_PREFIX)]
+        lines += [
+            f"*{info['modelName']}, note {info['noteId']}" + (f", tags {' '.join(tags)}" if tags else "") + "*",
+            "",
+        ]
+    path.write_text("\n".join(lines), encoding="utf-8")
+    rest = (
+        f" The {len(ids) - len(chosen)} newest matches are missing: narrow the search."
+        if len(ids) > len(chosen)
+        else ""
+    )
+    return f"Wrote {_count(len(chosen), 'note')} matching '{query}' to {path}.{rest}"
 
 
 class UpdateIn(BaseModel):
@@ -135,6 +201,8 @@ async def update_notes(
     infos = await a.anki.invoke("notesInfo", notes=[u.note_id for u in updates])
 
     errors: list[str] = []
+    repairs: list[str] = []
+    warnings: list[str] = []
     planned: list[tuple[int, dict[str, str], dict[str, str]]] = []
     for update, info in zip(updates, infos, strict=True):
         if not info:
@@ -148,6 +216,15 @@ async def update_notes(
         if unknown:
             errors.append(f"{update.note_id}: unknown fields {unknown}. {nt.name} has: {', '.join(nt.fields)}")
             continue
+        done = []
+        for name, value in list(fields.items()):
+            fields[name], what = repair(value)
+            if what:
+                done.append(f"{name} {', '.join(what)}")
+        if done:
+            repairs.append(f"{update.note_id} " + "; ".join(done))
+        if nt.kind != "io":
+            warnings += [f"{update.note_id} {problem}" for problem in lint(fields)]
         before = {name: info["fields"][name]["value"] for name in fields}
         planned.append((update.note_id, fields, before))
     if errors:
@@ -191,6 +268,10 @@ async def update_notes(
         lines.append(f'Updated {len(applied)} {noun}. Batch id {batch_id}: undo("{batch_id}") restores them.')
     if problems:
         lines += ["Not updated:", *problems]
+    if repairs:
+        lines += ["Repaired (LaTeX that lost its backslash in JSON, a '<' HTML would misread):", *repairs]
+    if warnings:
+        lines += ["Possible formatting problems, fix the real ones with update_notes:", *warnings]
     return "\n".join(lines)
 
 
@@ -218,25 +299,79 @@ async def delete_notes(
     return f"Deleted {len(note_ids)} {'note' if len(note_ids) == 1 else 'notes'}."
 
 
-@tool("Undo a batch", OVERWRITES)
-async def undo(ctx: Ctx, batch_id: str) -> str:
-    """Revert a draft_commit or update_notes by its batch id: added notes are deleted, changed fields restored.
+async def _undo_commit(a: App, batch_id: str, force: bool, known: bool) -> tuple[str, list[int]]:
+    """Delete the notes of a commit, except those the user studied or edited since (unless forced)."""
+    batch = f"tag:{BATCH_PREFIX}{batch_id}"
+    ids = await a.anki.invoke("findNotes", query=batch)
+    if not ids and not known:
+        raise ToolError(f"There is no batch '{batch_id}'.")
+    kept: list[int] = []
+    if ids and not force:
+        studied = set(await a.anki.invoke("findNotes", query=f"{batch} -is:new"))
+        # A note id is the time the note was added, in milliseconds; mod is the time of its last change, in seconds.
+        infos = await a.anki.invoke("notesInfo", notes=ids)
+        edited = {info["noteId"] for info in infos if info and info["mod"] > info["noteId"] // 1000 + EDIT_SLACK}
+        kept = sorted(studied | edited)
+    delete = [nid for nid in ids if nid not in kept]
+    if delete:
+        await a.anki.invoke("deleteNotes", notes=delete)
+    message = f"Undid batch {batch_id}: deleted {_count(len(delete), 'note')}."
+    if kept:
+        message += (
+            f" Left alone because the user studied or edited them since: {kept}. undo with force=true deletes them "
+            "too, review history included: ask the user first."
+        )
+    return message, kept
 
-    A note the user edited since is left alone.
+
+async def _undo_styling(a: App, batch_id: str, entry: dict[str, Any]) -> str:
+    restored, changed = [], []
+    for item in entry["styled"]:
+        try:
+            current = (await a.anki.invoke("modelStyling", modelName=item["note_type"]))["css"]
+        except AnkiError:
+            continue
+        if current != item["after"]:
+            changed.append(item["note_type"])
+            continue
+        await a.anki.invoke("updateModelStyling", model={"name": item["note_type"], "css": item["before"]})
+        restored.append(item["note_type"])
+    message = f"Undid batch {batch_id}: removed the formula CSS from {', '.join(restored) or 'no note type'}."
+    if changed:
+        message += f" Left alone because their styling was changed since: {', '.join(changed)}."
+    return message
+
+
+@tool("Undo a batch", OVERWRITES)
+async def undo(
+    ctx: Ctx,
+    batch_id: str,
+    force: Annotated[
+        bool,
+        Field(description="Commits only: also delete notes studied or edited since, with their history. Ask first"),
+    ] = False,
+) -> str:
+    """Revert a draft_commit, update_notes or math_css by its batch id: added notes are deleted, changed fields and
+    styling restored.
+
+    Notes the user studied or edited since are left alone and listed.
     """
     a = app(ctx)
     entries = a.journal.entries()
-    if any(e.get("undo_of") == batch_id for e in entries):
-        raise ToolError(f"Batch {batch_id} was already undone.")
     entry = next((e for e in reversed(entries) if e.get("batch_id") == batch_id and e["kind"] != "undo"), None)
+    is_commit = entry is None or entry["kind"] == "commit"
+    undone = [e for e in entries if e.get("undo_of") == batch_id]
+    if undone and not (force and is_commit):
+        message = f"Batch {batch_id} was already undone."
+        if is_commit and undone[-1].get("kept"):
+            message += " Some notes were left alone then; undo with force=true deletes them too (ask the user first)."
+        raise ToolError(message)
 
-    if entry is None or entry["kind"] == "commit":
-        ids = await a.anki.invoke("findNotes", query=f"tag:{BATCH_PREFIX}{batch_id}")
-        if not ids and entry is None:
-            raise ToolError(f"There is no batch '{batch_id}'.")
-        if ids:
-            await a.anki.invoke("deleteNotes", notes=ids)
-        message = f"Undid batch {batch_id}: deleted {len(ids)} {'note' if len(ids) == 1 else 'notes'}."
+    kept: list[int] = []
+    if is_commit:
+        message, kept = await _undo_commit(a, batch_id, force, known=entry is not None or bool(undone))
+    elif entry["kind"] == "styling":
+        message = await _undo_styling(a, batch_id, entry)
     else:
         updates = entry["updated"]
         infos = await a.anki.invoke("notesInfo", notes=[u["note_id"] for u in updates])
@@ -254,8 +389,52 @@ async def undo(ctx: Ctx, batch_id: str) -> str:
         if conflicts:
             message += f" Left alone because they were edited since: {conflicts}."
 
-    a.journal.append({"batch_id": uuid4().hex[:8], "kind": "undo", "undo_of": batch_id})
+    a.journal.append({"batch_id": uuid4().hex[:8], "kind": "undo", "undo_of": batch_id, "kept": kept})
     return message
+
+
+MATH_CSS_MARK = "/* anki-for-claude: long formulas"
+MATH_CSS = f"""
+{MATH_CSS_MARK} scroll sideways instead of running off the card on a phone */
+mjx-container[display="true"] {{
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+  padding: 0.5em 0;
+  margin: 0.5em 0 !important; /* half of MathJax's 1em moves inside, so tall formulas are not cut off */
+}}
+/* end anki-for-claude */
+"""
+
+
+@tool("Let long formulas scroll on phones", STYLES)
+async def math_css(
+    ctx: Ctx,
+    note_types: Annotated[list[str], Field(min_length=1, description="Note types to style, e.g. ['Basic', 'Cloze']")],
+) -> str:
+    """Add CSS to note types so that a display formula wider than the screen scrolls sideways on a phone instead
+    of running off the card. Only their styling changes. Returns a batch id for undo."""
+    a = app(ctx)
+    for name in note_types:
+        await a.note_types.get(name)  # fails with the list of note types if one does not exist
+    styled, already = [], []
+    for name in note_types:
+        before = (await a.anki.invoke("modelStyling", modelName=name))["css"]
+        if MATH_CSS_MARK in before:
+            already.append(name)
+            continue
+        await a.anki.invoke("updateModelStyling", model={"name": name, "css": before.rstrip() + "\n" + MATH_CSS})
+        after = (await a.anki.invoke("modelStyling", modelName=name))["css"]
+        styled.append({"note_type": name, "before": before, "after": after})
+    lines = []
+    if styled:
+        batch_id = uuid4().hex[:8]
+        a.journal.append({"batch_id": batch_id, "kind": "styling", "styled": styled})
+        names = ", ".join(item["note_type"] for item in styled)
+        lines.append(f'Long formulas now scroll in {names}. Batch id {batch_id}: undo("{batch_id}") removes it.')
+    if already:
+        lines.append(f"Already set up: {', '.join(already)}.")
+    return " ".join(lines)
 
 
 @tool("Sync with AnkiWeb", SYNC)

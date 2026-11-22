@@ -21,5 +21,6 @@ Go through the steps in order. Stop at the first one that fails, explain the fix
 3. **Image Occlusion** (only for image occlusion cards). `overview` lists a note type marked `[image occlusion]`. If there is none: it needs Anki 23.10 or newer; then the user adds it in Anki under Tools > Manage Note Types > Add > "Add: Image Occlusion".
 4. **Graphviz** (only for drawn graphs). `overview` says so when Graphviz is missing. The user installs it with `brew install graphviz` on macOS, `winget install graphviz` on Windows, or the `graphviz` package on Linux.
 5. **Phone** (only if the user studies on a phone). Call `sync`. If it fails, the user logs in to AnkiWeb in Anki under Tools > Preferences > Syncing.
+6. **Formulas on a phone** (only if the user's cards have formulas and they study on a phone). Anki never breaks a formula across lines, so a long one runs off a phone screen. Offer `math_css` for the note types the user writes cards with, usually Basic and Cloze as `overview` names them. It changes only their styling: a formula wider than the screen then scrolls sideways. Call it only after the user agrees; `undo` with the returned batch id removes it again.
 
 End with a short checklist: each item ok, or the fix the user still has to do. Do not change any cards during the check.

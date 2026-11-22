@@ -4,9 +4,11 @@ then draft_commit adds them."""
 import asyncio
 import os
 import re
-from collections.abc import AsyncGenerator
+from collections import Counter
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Annotated, Any
 from uuid import uuid4
@@ -16,20 +18,24 @@ from mcp.server.mcpserver.exceptions import ToolError
 from PIL import Image
 from pydantic import BaseModel, Field, ValidationError
 
-from anki_mcp.anki import AnkiError, NoteType
+from anki_mcp.anki import AnkiError, NoteType, deck_query, similar_decks
 from anki_mcp.images import downscale, local_images, png_bytes, replace_images, upload_images
 from anki_mcp.occlusion import Mask, build_field, draw_masks, find_label, parse_field
 from anki_mcp.server import ADDS, BATCH_PREFIX, CREATED_TAG, DRAFT, READ_ONLY, App, Ctx, app, tool
-from anki_mcp.text import cloze_ords, lint, readable, strip_html
+from anki_mcp.stats import content_flags
+from anki_mcp.text import cloze_ords, comparable, line_breaks_to_html, lint, readable, repair, strip_html, truncate
 
 MAX_AGE = timedelta(days=14)
+MAX_CARDS = 50
+MAX_COMPARED = 1500  # newest notes per deck that new cards are compared with
+SIMILAR = 0.85  # difflib ratio from which a card counts as a near-duplicate
 
 
 class CardIn(BaseModel):
     fields: dict[str, str] = Field(description="Field name -> content (HTML), names exactly as overview lists them")
-    tags: list[str] = []
-    note_type: str | None = Field(default=None, description="Only if it differs from the draft's note type")
-    deck: str | None = Field(default=None, description="Only if it differs from the draft's deck")
+    tags: list[str] = Field(default=[], description="Tags for this card, on top of the call's tags")
+    note_type: str | None = Field(default=None, description="Only if it differs from the call's note type")
+    deck: str | None = Field(default=None, description="Only if it differs from the call's deck")
 
 
 class DraftCard(BaseModel):
@@ -37,7 +43,7 @@ class DraftCard(BaseModel):
     deck: str
     note_type: str
     fields: dict[str, str]
-    tags: list[str] = []
+    tags: list[str] = []  # every tag the note gets, apart from the plugin's own
     allow_duplicate: bool = False
     error: str | None = None  # why the last draft_commit of this card failed
 
@@ -47,10 +53,11 @@ class Draft(BaseModel):
     title: str | None = None
     deck: str
     note_type: str
-    tags: list[str] = []
+    tags: list[str] = []  # given to every card added to the draft
     updated: datetime
     next_n: int = 1
     cards: list[DraftCard] = []
+    version: int = 1  # 2: every card holds all its tags. Before, the draft's tags were added at commit.
 
 
 def _now() -> datetime:
@@ -59,6 +66,19 @@ def _now() -> datetime:
 
 def _count(n: int, word: str) -> str:
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
+
+
+def _merge_tags(*groups: list[str]) -> list[str]:
+    """Tags in order, without repeats. Anki tags cannot contain spaces, so 'a b' is two tags."""
+    return list(dict.fromkeys(tag for group in groups for item in group for tag in item.split()))
+
+
+def _upgrade(draft: Draft) -> Draft:
+    if draft.version < 2:
+        for card in draft.cards:
+            card.tags = _merge_tags(draft.tags, card.tags)
+        draft.version = 2
+    return draft
 
 
 class DraftStore:
@@ -73,7 +93,7 @@ class DraftStore:
                 self.delete(draft.id)
 
     def create(self, **values: Any) -> Draft:
-        draft = Draft(id="d_" + uuid4().hex[:6], updated=_now(), **values)
+        draft = Draft(id="d_" + uuid4().hex[:6], updated=_now(), version=2, **values)
         self._save(draft)
         return draft
 
@@ -81,7 +101,7 @@ class DraftStore:
         path = self._path(draft_id)
         if not path.exists():
             raise ToolError(f"Draft '{draft_id}' does not exist. draft_show without an id lists the open drafts.")
-        return Draft.model_validate_json(path.read_text(encoding="utf-8"))
+        return _upgrade(Draft.model_validate_json(path.read_text(encoding="utf-8")))
 
     @asynccontextmanager
     async def edit(self, draft_id: str) -> AsyncGenerator[Draft, None]:
@@ -98,7 +118,7 @@ class DraftStore:
         drafts = []
         for path in self._root.glob("d_*.json"):
             try:
-                drafts.append(Draft.model_validate_json(path.read_text(encoding="utf-8")))
+                drafts.append(_upgrade(Draft.model_validate_json(path.read_text(encoding="utf-8"))))
             except ValidationError:
                 continue
         return sorted(drafts, key=lambda d: d.updated, reverse=True)
@@ -118,13 +138,94 @@ class DraftStore:
         os.replace(tmp, path)
 
 
+# --- cards as plain text -------------------------------------------------------------
+
+CARDS_TEXT = (
+    "Instead of 'cards': the cards as plain text, where LaTeX needs no doubled backslashes. Each card starts with "
+    "a line '## <note type>', optionally '| deck: <name> | tags: <a b>' after it ('##' alone: the call's note "
+    "type). Then 'Field: content' lines; a field runs until the next field name or '##', its line breaks become <br>"
+)
+_CARD_START = re.compile(r"^##(?!#)(.*)$")
+_FIELD_LINE = re.compile(r"^\s*([^:\n]{1,80}?)\s*:[ \t]?(.*)$")
+
+
+async def _parse_cards_text(a: App, text: str, note_type: str | None) -> list[CardIn]:
+    types = {nt.name.lower(): nt for nt in await a.note_types.all()}
+    blocks: list[tuple[int, str, list[tuple[int, str]]]] = []
+    problems: list[str] = []
+    for number, line in enumerate(text.splitlines(), start=1):
+        if m := _CARD_START.match(line):
+            blocks.append((number, m[1], []))
+        elif blocks:
+            blocks[-1][2].append((number, line))
+        elif line.strip():
+            problems.append(f"line {number}: text before the first card. Each card starts with '## <note type>'")
+    if not blocks and not problems:
+        problems.append("no card. Each card starts with a line '## <note type>'")
+
+    cards: list[CardIn] = []
+    for index, (number, head, body) in enumerate(blocks, start=1):
+        label = f"card {index} (line {number})"
+        name, deck, tags = None, None, []
+        for part in head.split("|"):
+            key, colon, value = part.partition(":")
+            if not colon:
+                name = part.strip() or name
+            elif key.strip().lower() == "deck":
+                deck = value.strip()
+            elif key.strip().lower() == "tags":
+                tags = value.split()
+            else:
+                problems.append(f"{label}: '{part.strip()}' is not 'deck: <name>' or 'tags: <a b>'")
+        nt = types.get((name or note_type or "").lower())
+        if nt is None:
+            wanted = f"no note type '{name or note_type}'" if name or note_type else "no note type"
+            problems.append(f"{label}: {wanted}. Note types: {', '.join(sorted(t.name for t in types.values()))}")
+            continue
+        lookup = {field.lower(): field for field in nt.fields}
+        fields: dict[str, str] = {}
+        current = None
+        for line_number, line in body:
+            m = _FIELD_LINE.match(line)
+            if m and m[1].strip().lower() in lookup:
+                current = lookup[m[1].strip().lower()]
+                if current in fields:
+                    problems.append(f"{label}: {current} appears twice, again in line {line_number}")
+                fields[current] = m[2]
+            elif current:
+                fields[current] += "\n" + line
+            elif line.strip():
+                problems.append(
+                    f"{label}: line {line_number} is not 'Field: content'. {nt.name} has: {', '.join(nt.fields)}"
+                )
+                break
+        if not fields:
+            problems.append(f"{label}: no fields. {nt.name} has: {', '.join(nt.fields)}")
+            continue
+        cards.append(
+            CardIn(
+                fields={k: line_breaks_to_html(v.strip()) for k, v in fields.items()},
+                tags=tags,
+                note_type=nt.name if name else None,
+                deck=deck,
+            )
+        )
+    if problems:
+        raise ToolError("Nothing was added. Fix these in cards_text and send it again:\n" + "\n".join(problems))
+    if len(cards) > MAX_CARDS:
+        raise ToolError(f"cards_text has {len(cards)} cards. Send at most {MAX_CARDS}, the rest with the draft_id.")
+    return cards
+
+
 # --- checks --------------------------------------------------------------------------
 
 
-async def _check(a: App, cards: list[tuple[str, DraftCard]], others: list[DraftCard]) -> tuple[list[str], set[str]]:
+async def _check(
+    a: App, cards: list[tuple[str, DraftCard]], others: list[DraftCard]
+) -> tuple[list[str], dict[str, str | None]]:
     """Check new or changed cards against Anki and the rest of the draft. Normalizes field names in place.
 
-    Returns (errors, decks that do not exist yet).
+    Returns the errors, and the decks that do not exist yet with an existing deck the name may have meant.
     """
     errors: list[str] = []
     seen: set[tuple[str, str]] = set()
@@ -181,7 +282,31 @@ async def _check(a: App, cards: list[tuple[str, DraftCard]], others: list[DraftC
                 if nt.kind == "cloze" and "unknown reason" in message:
                     message += " (a cloze card needs at least one {{c1::...}})"
                 errors.append(f"{label}: {message}")
-    return errors, {card.deck for _, card in cards} - decks
+    new_decks = {}
+    for deck in sorted({card.deck for _, card in cards} - decks):
+        similar = similar_decks(deck, decks)
+        new_decks[deck] = similar[0] if similar else None
+    return errors, new_decks
+
+
+def _repair(cards: list[DraftCard]) -> list[list[str]]:
+    """Repair the fields of the cards in place. Returns, per card, what was repaired in which field."""
+    repaired = []
+    for card in cards:
+        done = []
+        for name, value in list(card.fields.items()):
+            card.fields[name], what = repair(value)
+            if what:
+                done.append(f"{name} {', '.join(what)}")
+        repaired.append(done)
+    return repaired
+
+
+def _repair_lines(cards: list[DraftCard], repaired: list[list[str]]) -> list[str]:
+    return [f"#{card.n} " + "; ".join(done) for card, done in zip(cards, repaired, strict=True) if done]
+
+
+REPAIRED = "Repaired (LaTeX that lost its backslash in JSON, a '<' HTML would misread):"
 
 
 def _warnings(cards: list[DraftCard], note_types: dict[str, NoteType]) -> list[str]:
@@ -193,11 +318,82 @@ def _warnings(cards: list[DraftCard], note_types: dict[str, NoteType]) -> list[s
     return lines
 
 
-# Topics that exams usually show as a drawing. German compounds ("Binärbaum", "Zustandsdiagramm") match too.
+_RULES = {
+    "LONG_ANSWER": "the answer has more than 15 words: keep it to a phrase, or split the card",
+    "LIST_LIKE": "the answer reads like a list: split it, a list becomes cloze deletions",
+    "MANY_CLOZES": "more than five cloze numbers on one note: split it",
+}
+
+
+def _rule_hints(cards: list[DraftCard], note_types: dict[str, NoteType]) -> list[str]:
+    lines = []
+    for card in cards:
+        nt = note_types.get(card.note_type)
+        if nt and nt.kind != "io":
+            ordered = {name: card.fields[name] for name in nt.fields if name in card.fields}
+            lines.extend(f"#{card.n} {_RULES[flag]}" for flag in content_flags(ordered, nt.kind == "cloze"))
+    return lines
+
+
+_WORD = re.compile(r"\w{4,}")
+
+
+async def _similar(
+    a: App, cards: list[DraftCard], others: list[DraftCard], note_types: dict[str, NoteType]
+) -> list[str]:
+    """Cards whose first field reads almost like that of a note in their deck or of another card in the draft.
+    Anki itself only rejects exact copies."""
+
+    def first(card: DraftCard) -> str:
+        nt = note_types.get(card.note_type)
+        return card.fields.get(nt.fields[0], "") if nt and nt.kind != "io" else ""
+
+    pool: list[tuple[str, str, str]] = []  # label, text to compare, text to show
+    for deck in sorted({card.deck for card in cards}):
+        try:
+            ids = sorted(await a.anki.invoke("findNotes", query=deck_query(deck)), reverse=True)[:MAX_COMPARED]
+            infos = await a.anki.invoke("notesInfo", notes=ids) if ids else []
+        except AnkiError:
+            continue
+        for info in infos:
+            if info and info.get("fields"):
+                value = min(info["fields"].values(), key=lambda f: f["order"])["value"]
+                pool.append((f"note {info['noteId']}", comparable(value), value))
+    pool += [(f"#{card.n} of this draft", comparable(first(card)), first(card)) for card in others if first(card)]
+
+    index: dict[str, list[int]] = {}
+
+    def add(i: int) -> None:
+        for word in set(_WORD.findall(pool[i][1])):
+            index.setdefault(word, []).append(i)
+
+    for i in range(len(pool)):
+        add(i)
+
+    hints = []
+    for card in cards:
+        text = comparable(first(card))
+        if len(text) >= 12 and not card.allow_duplicate:
+            shared = Counter(i for word in set(_WORD.findall(text)) for i in index.get(word, ()))
+            best, ratio = None, SIMILAR
+            for i, _ in shared.most_common(30):
+                matcher = SequenceMatcher(None, text, pool[i][1])
+                if matcher.real_quick_ratio() >= ratio and matcher.quick_ratio() >= ratio and matcher.ratio() >= ratio:
+                    best, ratio = i, matcher.ratio()
+            if best is not None:
+                hints.append(f"#{card.n} reads like {pool[best][0]}: '{truncate(strip_html(pool[best][2]), 70)}'")
+        if text:
+            pool.append((f"#{card.n}", text, first(card)))
+            add(len(pool) - 1)
+    return hints
+
+
+# Topics that exams usually show as a drawing. German compounds ("Binärbaum", "Zustandsdiagramm") match too,
+# words like "automatisch", "Kryptographie" or "Biographie" do not.
 _DRAWN = re.compile(
-    r"(?<!para)(?<!photo)graph|\b[bd]fs\b|dijkstra|kruskal|prim's|\bheap|baum|\btrees?\b|\bavl\b|rot-schwarz|"
-    r"red-black|automat|\b[dn]fa\b|\bnea\b|\bdea\b|state machine|zustands|schaltung|circuit|petri|\buml\b|"
-    r"diagram|\bplot|skizz|sketch",
+    r"(?<!para)(?<!photo)graph(?!ie|y\b|ic)|\b[bd]fs\b|dijkstra|kruskal|prim's|\bheap|baum|\btrees?\b|\bavl\b|"
+    r"rot-schwarz|red-black|automat(?!is|ic|io)|\b[dn]fa\b|\bnea\b|\bdea\b|state machine|zustands|schaltung|"
+    r"circuit|petri|\buml\b|diagram|\bplot|skizz|sketch",
     re.IGNORECASE,
 )
 
@@ -212,6 +408,10 @@ def _picture_hints(cards: list[DraftCard]) -> list[str]:
     return hints
 
 
+def _section(title: str, items: list[str]) -> list[str]:
+    return [title, *items] if items else []
+
+
 # --- how cards look in the chat ------------------------------------------------------
 
 
@@ -220,7 +420,7 @@ def _header(draft: Draft) -> str:
     return f"Draft {draft.id}{title}, deck {draft.deck}"
 
 
-def _card_text(card: DraftCard, nt: NoteType | None, deck: str) -> str:
+def _card_text(card: DraftCard, nt: NoteType | None, deck: str, common: set[str]) -> str:
     head = f"#{card.n} {card.note_type}"
     fields = dict(card.fields)
     if nt and nt.kind == "cloze":
@@ -242,8 +442,9 @@ def _card_text(card: DraftCard, nt: NoteType | None, deck: str) -> str:
         if first:
             lines.append(f"{name}: {first}")
             lines.extend(f"  {line}" for line in rest)
-    if card.tags:
-        lines.append("Tags: " + " ".join(card.tags))
+    own = [tag for tag in card.tags if tag not in common]
+    if own:
+        lines.append("Tags: " + " ".join(own))
     if card.error:
         lines.append(f"Last draft_commit failed: {card.error}")
     return "\n".join(lines)
@@ -252,7 +453,11 @@ def _card_text(card: DraftCard, nt: NoteType | None, deck: str) -> str:
 async def _cards_text(a: App, draft: Draft, cards: list[DraftCard]) -> list[str]:
     """The cards as text for the chat, plus where their images are."""
     note_types = {nt.name: nt for nt in await a.note_types.all()}
-    blocks = [_card_text(card, note_types.get(card.note_type), draft.deck) for card in cards]
+    common = set.intersection(*(set(card.tags) for card in cards)) if len(cards) > 1 else set()
+    blocks = []
+    if common:
+        blocks.append("Tags of every card below: " + " ".join(tag for tag in cards[0].tags if tag in common))
+    blocks += [_card_text(card, note_types.get(card.note_type), draft.deck, common) for card in cards]
     if any(local_images(v) for card in cards for v in card.fields.values()):
         blocks.append(f"The images are in {a.images.folder}.")
     return blocks
@@ -270,13 +475,25 @@ def _numbers(cards: list[DraftCard] | list[int]) -> str:
     return ", ".join(f"#{run[0]}" if len(run) == 1 else f"#{run[0]}-#{run[-1]}" for run in runs)
 
 
+def _new_decks(new_decks: dict[str, str | None]) -> list[str]:
+    lines = []
+    for deck, similar in new_decks.items():
+        line = f"New deck, created by draft_commit: {deck}"
+        if similar:
+            line += f". '{similar}' exists: if that was meant, move the cards there with draft_edit (deck)"
+        lines.append(line)
+    return lines
+
+
 # --- tools ---------------------------------------------------------------------------
 
 
-async def _append(a: App, draft_id: str | None, cards: list[DraftCard], **new: Any) -> Draft:
+async def _append(a: App, draft_id: str | None, cards: list[DraftCard], title: str | None, **new: Any) -> Draft:
     if not draft_id:
-        draft_id = a.drafts.create(**new).id
+        draft_id = a.drafts.create(title=title, **new).id
     async with a.drafts.edit(draft_id) as draft:
+        if title:
+            draft.title = title
         for card in cards:
             card.n = draft.next_n
             draft.next_n += 1
@@ -284,64 +501,112 @@ async def _append(a: App, draft_id: str | None, cards: list[DraftCard], **new: A
     return draft
 
 
-def _added(draft: Draft, cards: list[DraftCard], new_decks: set[str]) -> list[str]:
+def _added(draft: Draft, cards: list[DraftCard], new_decks: dict[str, str | None]) -> list[str]:
     total = _count(len(draft.cards), "card")
     lines = [f"{_header(draft)}: added {_numbers(cards)}. The draft has {total}, none of them is in Anki yet."]
-    if new_decks:
-        lines.append("New deck, created by draft_commit: " + ", ".join(sorted(new_decks)))
-    return lines
+    return lines + _new_decks(new_decks)
 
 
 NEXT_STEP = "Show the cards to the user. Apply their changes with draft_edit; when they approve, call draft_commit."
+QUIET_STEP = (
+    "The cards are not shown (echo=false); draft_show shows them. Call draft_commit once the user has approved them, "
+    "or right away if they asked for the cards to be added without seeing them."
+)
+ECHO = (
+    "false: reply with card numbers, repairs and warnings only, not the cards. For when the user said to add the "
+    "cards without seeing them, or when nobody reads them"
+)
 
 
 @tool("Add cards to a draft", DRAFT)
 async def draft_add(
     ctx: Ctx,
-    cards: Annotated[list[CardIn], Field(min_length=1, max_length=50)],
+    cards: Annotated[list[CardIn] | None, Field(min_length=1, max_length=MAX_CARDS)] = None,
+    cards_text: Annotated[str | None, Field(description=CARDS_TEXT)] = None,
     draft_id: Annotated[str | None, Field(description="Add to this draft. Without it a new draft is created")] = None,
-    deck: Annotated[str | None, Field(description="New draft: full deck name, e.g. 'Math::Analysis'")] = None,
-    note_type: Annotated[str | None, Field(description="New draft: note type, e.g. 'Basic'")] = None,
-    tags: Annotated[list[str] | None, Field(description="New draft: tags for all its cards")] = None,
-    title: Annotated[str | None, Field(description="New draft: a short name")] = None,
+    deck: Annotated[
+        str | None, Field(description="Deck of these cards, full name, e.g. 'Math::Analysis'. A new draft needs it")
+    ] = None,
+    note_type: Annotated[
+        str | None, Field(description="Note type of these cards, e.g. 'Basic'. A new draft needs it")
+    ] = None,
+    tags: Annotated[
+        list[str] | None, Field(description="Tags for these cards. A new draft also gives them to later cards")
+    ] = None,
+    title: Annotated[str | None, Field(description="A short name for the draft")] = None,
     allow_duplicate: Annotated[bool, Field(description="Allow cards whose first field already exists")] = False,
+    echo: Annotated[bool, Field(description=ECHO)] = True,
 ) -> str:
     """Check cards against Anki and add them to a draft. Nothing is written to Anki.
 
-    Returns the cards as text to show the user. If any card has a problem, none is added and every problem is listed.
+    Pass 'cards', or 'cards_text' for cards with LaTeX. LaTeX that lost a backslash in JSON is repaired.
+    Returns the cards as text to show the user (no HTML, &amp; shows as &). If any card has a problem,
+    none is added and every problem is listed.
     """
     a = app(ctx)
+    if cards is not None and cards_text is not None:
+        raise ToolError("Pass the cards as 'cards' or as 'cards_text', not both.")
     others: list[DraftCard] = []
+    base_tags: list[str] = []
     if draft_id:
         draft = a.drafts.load(draft_id)
-        deck, note_type, others = draft.deck, draft.note_type, draft.cards
-    elif not deck or not note_type:
-        raise ToolError("A new draft needs 'deck' and 'note_type'. To add to an existing draft, pass its draft_id.")
+        others, base_tags = draft.cards, draft.tags
+        deck, note_type = deck or draft.deck, note_type or draft.note_type
+    if cards_text is not None:
+        items = await _parse_cards_text(a, cards_text, note_type)
+    elif cards is not None:
+        items = cards
+    else:
+        raise ToolError("Pass the cards as 'cards' or as 'cards_text'.")
+
+    def label(i: int) -> str:
+        return f"card {i + 1}" if cards_text is not None else f"cards[{i}]"
+
+    lacking = [label(i) for i, c in enumerate(items) if not (c.deck or deck) or not (c.note_type or note_type)]
+    if lacking:
+        raise ToolError(
+            "A new draft needs 'deck' and 'note_type', for the call or for each card. Missing for "
+            + ", ".join(lacking[:5])
+            + ". To add to an existing draft, pass its draft_id."
+        )
     new = [
         DraftCard(
-            deck=c.deck or deck,
-            note_type=c.note_type or note_type,
+            deck=c.deck or deck or "",
+            note_type=c.note_type or note_type or "",
             fields=c.fields,
-            tags=c.tags,
+            tags=_merge_tags(base_tags, tags or [], c.tags),
             allow_duplicate=allow_duplicate,
         )
-        for c in cards
+        for c in items
     ]
-    errors, new_decks = await _check(a, [(f"cards[{i}]", card) for i, card in enumerate(new)], others)
+    repaired = _repair(new)
+    errors, new_decks = await _check(a, [(label(i), card) for i, card in enumerate(new)], others)
     if errors:
         raise ToolError("Nothing was added. Fix these and send all cards again:\n" + "\n".join(errors))
-    draft = await _append(a, draft_id, new, deck=deck, note_type=note_type, tags=tags or [], title=title)
+    defaults = {
+        "deck": deck or new[0].deck,
+        "note_type": note_type or new[0].note_type,
+        "tags": _merge_tags(tags or []),
+    }
+    draft = await _append(a, draft_id, new, title, **defaults)
 
+    note_types = {nt.name: nt for nt in await a.note_types.all()}
     lines = _added(draft, new, new_decks)
-    warnings = _warnings(new, {nt.name: nt for nt in await a.note_types.all()})
-    if warnings:
-        lines += ["Possible formatting problems, fix the real ones with draft_edit:", *warnings]
+    lines += _section(REPAIRED, _repair_lines(new, repaired))
+    lines += _section("Possible formatting problems, fix the real ones with draft_edit:", _warnings(new, note_types))
+    lines += _section("Possibly against the card rules:", _rule_hints(new, note_types))
+    lines += _section(
+        "Close to cards that exist, check whether they are near-duplicates:",
+        await _similar(a, new, others, note_types),
+    )
     hints = _picture_hints(new)
     if hints:
         lines.append(
             "Cards about something usually drawn, without a picture: " + ", ".join(hints) + ". If the exam shows it "
             "as a drawing, add one before showing the cards (visuals skill: render_graph, pdf_figures, occlusion)."
         )
+    if not echo:
+        return "\n".join([*lines, QUIET_STEP])
     return "\n\n".join(["\n".join(lines), *await _cards_text(a, draft, new), NEXT_STEP])
 
 
@@ -368,8 +633,10 @@ async def draft_add_occlusion(
     ] = True,
     draft_id: Annotated[str | None, Field(description="Add to this draft. Without it a new draft is created")] = None,
     deck: Annotated[str | None, Field(description="New draft: full deck name")] = None,
-    tags: Annotated[list[str] | None, Field(description="New draft: tags for all its cards")] = None,
-    title: Annotated[str | None, Field(description="New draft: a short name")] = None,
+    tags: Annotated[
+        list[str] | None, Field(description="Tags for this card. A new draft also gives them to later cards")
+    ] = None,
+    title: Annotated[str | None, Field(description="A short name for the draft")] = None,
 ) -> list[Any]:
     """Add an Image Occlusion note (Anki 23.10+) to a draft. Each mask, or each group of masks, becomes one card.
 
@@ -384,9 +651,10 @@ async def draft_add_occlusion(
         )
     nt = io_types[0]
     others: list[DraftCard] = []
+    base_tags: list[str] = []
     if draft_id:
         draft = a.drafts.load(draft_id)
-        deck, others = draft.deck, draft.cards
+        deck, others, base_tags = deck or draft.deck, draft.cards, draft.tags
     elif not deck:
         raise ToolError("A new draft needs 'deck'. To add to an existing draft, pass its draft_id.")
     staged = a.images.get(image)
@@ -427,11 +695,14 @@ async def draft_add_occlusion(
         io.get("header", "Header"): header,
         io.get("back_extra", "Back Extra"): back_extra,
     }
-    card = DraftCard(deck=deck, note_type=nt.name, fields=fields, tags=[], allow_duplicate=True)
+    card = DraftCard(
+        deck=deck, note_type=nt.name, fields=fields, tags=_merge_tags(base_tags, tags or []), allow_duplicate=True
+    )
+    _repair([card])
     errors, new_decks = await _check(a, [("card", card)], others)
     if errors:
         raise ToolError("Nothing was added:\n" + "\n".join(errors))
-    draft = await _append(a, draft_id, [card], deck=deck, note_type=nt.name, tags=tags or [], title=title)
+    draft = await _append(a, draft_id, [card], title, deck=deck, note_type=nt.name, tags=_merge_tags(tags or []))
 
     with Image.open(staged.path) as img:
         preview = draw_masks(img.convert("RGB"), resolved)
@@ -444,44 +715,111 @@ async def draft_add_occlusion(
 class EditIn(BaseModel):
     card: int = Field(description="Card number in the draft, e.g. 3 for #3")
     fields: dict[str, str] | None = Field(default=None, description="Only the fields that change")
-    tags: list[str] | None = Field(default=None, description="Replaces the card's tags")
+    tags: list[str] | None = Field(default=None, description="Replaces all tags of the card")
+    deck: str | None = Field(default=None, description="Moves the card to this deck (full name)")
     remove: bool = Field(default=False, description="Remove the card from the draft")
 
 
-@tool("Change cards in a draft", DRAFT)
-async def draft_edit(ctx: Ctx, draft_id: str, edits: Annotated[list[EditIn], Field(min_length=1)]) -> str:
-    """Change or remove cards of a draft by number. Send only the fields that change; the others stay.
+class ReplaceIn(BaseModel):
+    find: str = Field(min_length=1, description="Text to find; a Python regular expression with regex=true")
+    replacement: str = Field(description="What replaces it. With regex=true, \\1 and \\g<name> insert a group")
+    regex: bool = False
+    cards: list[int] | None = Field(default=None, description="Only these card numbers. Without it: every card")
+    fields: list[str] | None = Field(default=None, description="Only these fields. Without it: every field")
 
-    Returns the changed cards as text to show the user.
+
+_GROUP_REF = re.compile(r"\\(\d+)|\\g<(\w+)>")
+
+
+def _replacer(r: ReplaceIn) -> tuple[re.Pattern[str], Callable[[re.Match[str]], str]]:
+    """The pattern and what to put in for each match. Only \\1 and \\g<name> are special in the replacement,
+    so the backslashes of LaTeX stay as they are."""
+    try:
+        pattern = re.compile(r.find if r.regex else re.escape(r.find))
+    except re.error as exc:
+        raise ToolError(f"'{r.find}' is not a valid regular expression: {exc}") from None
+
+    def literal(_: re.Match[str]) -> str:
+        return r.replacement
+
+    def expand(m: re.Match[str]) -> str:
+        def group(g: re.Match[str]) -> str:
+            try:
+                return m[int(g[1]) if g[1] else g[2]] or ""
+            except (IndexError, KeyError):
+                raise ToolError(f"The replacement '{r.replacement}' refers to a group '{r.find}' lacks.") from None
+
+        return _GROUP_REF.sub(group, r.replacement)
+
+    return pattern, expand if r.regex else literal
+
+
+@tool("Change cards in a draft", DRAFT)
+async def draft_edit(
+    ctx: Ctx,
+    draft_id: str,
+    edits: Annotated[list[EditIn] | None, Field(description="Changes card by card")] = None,
+    replace: Annotated[
+        list[ReplaceIn] | None,
+        Field(max_length=20, description="Find and replace across the draft, applied before 'edits'"),
+    ] = None,
+    echo: Annotated[bool, Field(description="false: reply with card numbers and problems only, not the cards")] = True,
+) -> str:
+    """Change, move or remove cards of a draft by number, or find and replace across all its cards.
+
+    Send only the fields that change; the others stay. Returns the changed cards as text to show the user.
     """
+    if not edits and not replace:
+        raise ToolError("Pass 'edits', 'replace' or both.")
     a = app(ctx)
     async with a.drafts.edit(draft_id) as draft:
         by_n = {card.n: card for card in draft.cards}
-        missing = [e.card for e in edits if e.card not in by_n]
+        asked = [e.card for e in edits or []] + [n for r in replace or [] for n in r.cards or []]
+        missing = sorted(set(asked) - set(by_n))
         if missing:
             raise ToolError(f"Draft {draft_id} has no card {_numbers(missing)}.")
 
-        removed = {e.card for e in edits if e.remove}
-        changed: list[DraftCard] = []
-        for e in edits:
+        work = {n: card.model_copy(deep=True) for n, card in by_n.items()}
+        touched: set[int] = set()
+        report = []
+        for r in replace or []:
+            pattern, replacement = _replacer(r)
+            only = {name.lower() for name in r.fields} if r.fields else None
+            hits: dict[int, int] = {}
+            for n in r.cards or list(by_n):
+                card = work[n]
+                for name, value in list(card.fields.items()):
+                    if only is None or name.lower() in only:
+                        card.fields[name], count = pattern.subn(replacement, value)
+                        if count:
+                            hits[n] = hits.get(n, 0) + count
+            touched |= set(hits)
+            found = f"{_count(sum(hits.values()), 'time')} in {_numbers(list(hits))}" if hits else "not found"
+            report.append(f"'{truncate(r.find, 40)}': {found}")
+
+        removed = {e.card for e in edits or [] if e.remove}
+        for e in edits or []:
             if e.remove:
                 continue
-            card = by_n[e.card].model_copy(deep=True)
+            card = work[e.card]
             if e.fields:
                 card.fields = {**card.fields, **e.fields}
             if e.tags is not None:
-                card.tags = e.tags
-            card.error = None
-            changed.append(card)
+                card.tags = _merge_tags(e.tags)
+            if e.deck:
+                card.deck = e.deck
+            touched.add(e.card)
+        touched -= removed
 
-        touched = removed | {card.n for card in changed}
-        others = [card for card in draft.cards if card.n not in touched]
-        errors, _ = await _check(a, [(f"#{card.n}", card) for card in changed], others)
+        changed = [work[n] for n in sorted(touched)]
+        for card in changed:
+            card.error = None
+        repaired = _repair(changed)
+        others = [card for card in draft.cards if card.n not in touched | removed]
+        errors, new_decks = await _check(a, [(f"#{card.n}", card) for card in changed], others)
         if errors:
             raise ToolError("Nothing was changed:\n" + "\n".join(errors))
-
-        replaced = {card.n: card for card in changed}
-        draft.cards = [replaced.get(card.n, card) for card in draft.cards if card.n not in removed]
+        draft.cards = [work[card.n] if card.n in touched else card for card in draft.cards if card.n not in removed]
 
     if not draft.cards:
         return f"Draft {draft_id} has no cards left and was deleted."
@@ -490,13 +828,14 @@ async def draft_edit(ctx: Ctx, draft_id: str, edits: Annotated[list[EditIn], Fie
         done.append(f"changed {_numbers(changed)}")
     if removed:
         done.append(f"removed {_numbers(sorted(removed))}")
-    lines = [
-        f"Draft {draft_id}: {' and '.join(done)}. {_count(len(draft.cards), 'card')} left, none of them is in Anki yet."
-    ]
-    warnings = _warnings(changed, {nt.name: nt for nt in await a.note_types.all()})
-    if warnings:
-        lines += ["Possible formatting problems:", *warnings]
-    if not changed:
+    left = _count(len(draft.cards), "card")
+    lines = [f"Draft {draft_id}: {' and '.join(done) or 'nothing changed'}. {left} left, none of them is in Anki yet."]
+    lines += _section("Replaced:", report) + _new_decks(new_decks)
+    note_types = {nt.name: nt for nt in await a.note_types.all()}
+    lines += _section(REPAIRED, _repair_lines(changed, repaired))
+    lines += _section("Possible formatting problems:", _warnings(changed, note_types))
+    lines += _section("Possibly against the card rules:", _rule_hints(changed, note_types))
+    if not changed or not echo:
         return "\n".join(lines)
     return "\n\n".join(["\n".join(lines), *await _cards_text(a, draft, changed), "Show the changed cards to the user."])
 
@@ -563,7 +902,7 @@ async def draft_commit(
                 "deckName": card.deck,
                 "modelName": card.note_type,
                 "fields": {name: replace_images(value, stored) for name, value in card.fields.items()},
-                "tags": [*draft.tags, *card.tags, CREATED_TAG, BATCH_PREFIX + batch_id],
+                "tags": _merge_tags(card.tags, [CREATED_TAG, BATCH_PREFIX + batch_id]),
                 "options": {"allowDuplicate": card.allow_duplicate},
             }
             calls.append(("addNote", {"note": note}))

@@ -47,6 +47,7 @@ READ_ONLY = _annotations(True, False, True)
 DRAFT = _annotations(True, False, False)  # changes drafts and images, never the collection
 ADDS = _annotations(False, False, False)
 OVERWRITES = _annotations(False, True, True)
+STYLES = _annotations(False, False, True)  # adds CSS to note types, undo removes it
 WEB_READ = _annotations(True, False, True, web=True)
 SYNC = _annotations(False, False, True, web=True)
 

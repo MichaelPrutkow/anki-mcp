@@ -36,6 +36,8 @@ Cards created by this plugin have the tag `mcp::created`, and each commit adds `
 
 No hits usually means the query is malformed, not that nothing matches.
 
+`search_notes` with `save_to` (an absolute path ending in `.md`) writes every match in full into a Markdown file instead of listing it, formulas with `$` and cloze answers in bold: for notes or a summary of a week's cards, without reading them all into the chat.
+
 ## Finding the cards that do not work
 
 1. Call `sync`, so reviews from the phone count. If it fails, go on without it.
@@ -57,7 +59,7 @@ No hits usually means the query is malformed, not that nothing matches.
 ## Changing cards
 
 - `update_notes` changes fields and keeps the review history. Prefer it to deleting and adding a new card.
-- Send only the fields that change, each with its full new content.
+- Send only the fields that change, each with its full new content. Like `draft_add`, it repairs LaTeX that lost a backslash in JSON and lists formatting problems.
 - Notes without the tag `mcp::created` were written by the user. Ask before changing them, then call `update_notes` again with `force=true`.
 - The formatting rules of the `create-cards` skill apply to every field you write.
 - To add a picture to an existing card, make it with the tools from the `visuals` skill and put its `<img>` tag into the field.
@@ -68,6 +70,6 @@ Delete a card only when it should not exist at all, and ask the user first. `del
 
 ## Undoing
 
-- `draft_commit` and `update_notes` return a batch id. `undo` with that id deletes the notes a commit added, or restores the fields an update changed.
-- A note the user edited since is left alone and reported.
+- `draft_commit`, `update_notes` and `math_css` return a batch id. `undo` with that id deletes the notes a commit added, restores the fields an update changed, or removes the formula CSS.
+- Notes the user studied or edited since are left alone and listed. For a commit, `undo` with `force=true` deletes them too, review history included: only when the user says so.
 - Deleting cannot be undone.

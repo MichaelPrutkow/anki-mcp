@@ -1,7 +1,8 @@
 import asyncio
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Any
 
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import BaseModel, Field
@@ -17,6 +18,7 @@ OUTLINE_STEP_SECONDS = 90
 @dataclass
 class Video:
     segments: list[tuple[float, float, str]]  # (start, end, text)
+    language: str
     translated: bool
 
 
@@ -34,7 +36,33 @@ def _timestamp(seconds: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
 
 
-def _fetch(url: str, language: str) -> Video:
+def choose(transcripts: Iterable[Any], language: str | None) -> tuple[Any, bool]:
+    """The transcript to read and whether it is machine-translated.
+
+    Without a language: the video's own, the one YouTube generated from the speech, or a manual one in its
+    language. With a language: a transcript in it, otherwise the first one translated into it.
+    """
+    available = list(transcripts)
+    if not available:
+        raise ToolError("This video has no transcripts.")
+    if language:
+        wanted = language.lower()
+        for transcript in available:
+            code = transcript.language_code.lower()
+            if code == wanted or code.startswith(wanted + "-"):
+                return transcript, False
+        if not available[0].is_translatable:
+            raise ToolError(f"The {available[0].language} transcript cannot be translated.")
+        return available[0].translate(language), True
+    generated = [t for t in available if t.is_generated]
+    manual = [t for t in available if not t.is_generated]
+    if generated:
+        spoken = generated[0].language_code
+        return next((t for t in manual if t.language_code == spoken), generated[0]), False
+    return manual[0], False
+
+
+def _fetch(url: str, language: str | None) -> Video:
     match = re.search(r"(?:v=|/)([0-9A-Za-z_-]{11})", url)
     if not match:
         raise ToolError(f"Invalid YouTube URL: {url}")
@@ -42,20 +70,13 @@ def _fetch(url: str, language: str) -> Video:
         transcripts = YouTubeTranscriptApi().list(match.group(1))
     except TranscriptsDisabled:
         raise ToolError("Transcripts are disabled for this video.") from None
-
-    translated = False
-    try:
-        transcript = transcripts.find_transcript([language])
     except NoTranscriptFound:
-        available = list(transcripts)
-        if not available:
-            raise ToolError("This video has no transcripts.") from None
-        if not available[0].is_translatable:
-            raise ToolError(f"The {available[0].language} transcript cannot be translated.") from None
-        transcript, translated = available[0].translate(language), True
+        raise ToolError("This video has no transcripts.") from None
 
+    transcript, translated = choose(transcripts, language)
     snippets = transcript.fetch().snippets
-    return Video([(s.start, s.start + s.duration, s.text.strip()) for s in snippets], translated)
+    code = language if translated else transcript.language_code
+    return Video([(s.start, s.start + s.duration, s.text.strip()) for s in snippets], code, translated)
 
 
 def _outline(video: Video) -> str:
@@ -73,19 +94,22 @@ def _outline(video: Video) -> str:
 async def youtube_transcript(
     url: str,
     intervals: Annotated[list[TimeInterval] | None, Field(max_length=30)] = None,
-    language: Annotated[str, Field(min_length=2, description="Transcript language code, e.g. 'de'")] = "en",
+    language: Annotated[
+        str | None,
+        Field(min_length=2, description="Language code, e.g. 'de'. Without it: the video's own language"),
+    ] = None,
 ) -> str:
-    """Read the transcript of a YouTube video.
+    """Read the transcript of a YouTube video, in the video's own language unless another is asked for.
 
     A long video returns a timestamped outline instead; call again with 'intervals' to read the parts that matter.
     """
-    key = (url, language)
+    key = (url, language or "")
     if key not in _videos:
         if len(_videos) >= MAX_CACHED_VIDEOS:
             _videos.pop(next(iter(_videos)))
         _videos[key] = await asyncio.to_thread(_fetch, url, language)
     video = _videos[key]
-    note = "\n\n(machine-translated)" if video.translated else ""
+    note = f"\n\n(transcript in '{video.language}'{', machine-translated' if video.translated else ''})"
 
     if intervals:
         blocks = []

@@ -8,10 +8,11 @@ from pydantic import Field
 
 from anki_mcp.anki import AnkiError
 from anki_mcp.server import READ_ONLY, App, Ctx, app, tool
-from anki_mcp.text import cloze_ords, strip_html, truncate
+from anki_mcp.text import cloze_ords, prose, strip_html, truncate
 
 WEAK = "-is:new -is:suspended (tag:leech OR prop:lapses>=3 OR rated:{days}:1 OR prop:d>0.7 OR prop:r<0.75 OR flag:1)"
 WEAK_WITHOUT_FSRS = "-is:new -is:suspended (tag:leech OR prop:lapses>=3 OR rated:{days}:1 OR flag:1)"
+CLEAREST = "-is:new -is:suspended (rated:{days}:1 OR tag:leech OR flag:1)"
 MAX_CANDIDATES = 300
 MAX_REVIEWED = 5000
 REVIEW = 1  # revlog type: 0 learn, 1 review, 2 relearn, 3 filtered
@@ -58,7 +59,8 @@ def score(s: CardStats) -> float:
 
 
 def content_flags(fields: dict[str, str], is_cloze: bool) -> list[str]:
-    values = [strip_html(v) for v in fields.values()]
+    """Signs that a card asks for several things. A formula counts as one word, and its commas do not count."""
+    values = [prose(v) for v in fields.values()]
     flags = []
     answer = values[1] if len(values) > 1 and not is_cloze else ""
     if len(answer.split()) > 15:
@@ -82,7 +84,11 @@ async def _weak_cards(a: App, scope: str, window_days: int, limit: int) -> str:
         ids = await a.anki.invoke("findCards", query=_query(scope, WEAK_WITHOUT_FSRS.format(days=window_days)))
     if not ids:
         return "No weak cards: nothing was answered wrong, lapsed often, flagged red or marked as a leech."
-    ids = ids[:MAX_CANDIDATES]
+    candidates = len(ids)
+    if candidates > MAX_CANDIDATES:
+        # Cards with the clearest signal first (failed lately, leech, red flag), then the newest.
+        clearest = set(await a.anki.invoke("findCards", query=_query(scope, CLEAREST.format(days=window_days))))
+        ids = sorted(ids, key=lambda i: (i not in clearest, -i))[:MAX_CANDIDATES]
     infos, logs, leeches = await a.anki.multi(
         [
             ("cardsInfo", {"cards": ids}),
@@ -116,8 +122,9 @@ async def _weak_cards(a: App, scope: str, window_days: int, limit: int) -> str:
             worst[s.note_id] = (s, {**info, "_fields": fields}, nt.kind == "cloze")
 
     ranked = sorted(worst.values(), key=lambda t: t[0].score, reverse=True)[:limit]
+    looked_at = f", ranked the {len(ids)} with the clearest signal" if candidates > len(ids) else ""
     lines = [
-        f"The {len(ranked)} weakest notes, worst first ({len(ids)} candidate cards, last {window_days} days).",
+        f"The {len(ranked)} weakest notes, worst first ({candidates} candidates{looked_at}, last {window_days} days).",
         "Per note: score (0-1), share of 'again' answers, lapses, FSRS difficulty D (0-1), median answer time, flags.",
     ]
     for i, (s, info, is_cloze) in enumerate(ranked, start=1):
