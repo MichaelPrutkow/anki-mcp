@@ -15,11 +15,12 @@
   <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11%2B-3776AB">
 </p>
 
-Ask Claude for an `.apkg` or a CSV and you get text, because it can't put a picture into either.
-This one talks to Anki directly, so a card about a graph algorithm actually shows the graph, and a
-card about a lecture figure shows the figure. Cards come from slides, PDFs, YouTube videos or
-whatever you paste in. It runs locally against your Anki, and nothing touches your collection
-until you say yes.
+When I ask Claude for an `.apkg` or a `.csv`, I get text-only cards, because it can't get a picture into
+either. This plugin talks to Anki directly, so a card about a graph algorithm shows the graph and
+a card about a lecture figure shows the figure. It works from slides, PDFs, YouTube videos or
+whatever you paste in. Nothing lands in your collection until you say yes, unless you turn off approval
+and let it autocommit. That saves output tokens and lets you automate the whole thing, e.g. with
+scheduled tasks, no human in the loop.
 
 > Unofficial. Not affiliated with Ankitects.
 
@@ -27,30 +28,35 @@ https://github.com/user-attachments/assets/68d1f24f-7f6c-480d-aa16-c312484f873b
 
 https://github.com/user-attachments/assets/00ac5217-9e81-4b8c-8479-c9aa38729dc4
 
+***Old version, prior to picture support (Opus 5 was the hottest model back then)***
+
+
 ## What it does
 
-- **Real pictures, on the cards.** Graphs, trees and automata through Graphviz, figures cut out of
-  your PDF by caption, matplotlib plots, and image occlusion with masks placed from the PDF's text
-  layer instead of guessed from pixels. Claude looks for the spots where a picture makes the card
-  better (a diagram the exam keeps asking about). If the slides already have a good one, it crops
-  that instead of redrawing it.
+- **Pictures.** Graphs, trees and automata (Graphviz), figures cropped from your PDF, plots, and
+  image occlusion. Claude looks for spots where a picture makes the card better, like a diagram the
+  exam keeps asking about. If the slides already have a good one, it just crops that.
 - **Cards with rules.** One fact per card, no yes/no questions, lists become clozes. The wording
   follows [Signs of AI writing](https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing), so
-  the cards don't sound like a chatbot.
-- **You approve everything.** Claude shows every card, you say what to change, then it commits.
-  Or tell it to commit directly and it skips printing them.
-- **Fixes what you fail.** It ranks your cards by again rate, lapses, FSRS difficulty and leeches,
-  works out why they fail and rewrites them without losing the review history.
-- **A whole course at once.** `/anki:exam-prep` takes slides, exercise sheets and past exams and
-  builds a deck weighted by what the exams actually ask.
-- **Undo.** Every change returns a batch id. `undo` reverts it.
+  the cards don't read like a chatbot.
+- **You approve everything.** Claude shows every card first. Change what you want, then it adds
+  them. Say "commit directly" to skip that.
+- **Fixes cards you keep failing.** It ranks your cards by again rate, lapses, FSRS difficulty and
+  leeches, figures out why they fail and rewrites them. Review history stays.
+- **Whole courses.** `/anki:exam-prep` takes slides, exercise sheets and past exams and builds a
+  deck weighted by what the exams actually ask.
+- **Undo.** Every change gets a batch id, `undo` reverts it.
 
 ## Setup
 
 You need macOS or Linux, Anki with [AnkiConnect](https://ankiweb.net/shared/info/2055492159)
-(code `2055492159`, restart Anki), and Claude Code or the Claude desktop app. With Anki 25.07+
-there's nothing else to install. On older Anki (23.10+), get [uv](https://docs.astral.sh/uv/).
-[Graphviz](https://graphviz.org/download/) is optional, for graphs.
+(code `2055492159`, restart Anki afterwards) and Claude Code or the Claude desktop app. Anki 25.07+
+needs nothing else. On older versions (23.10+) install [uv](https://docs.astral.sh/uv/).
+[Graphviz](https://graphviz.org/download/) is optional, only for graphs.
+
+Add my marketplace, `MichaelPrutkow/anki-for-claude` ([repo link](https://github.com/MichaelPrutkow/anki-for-claude)), and install from it.
+
+Claude Code:
 
 ```
 /plugin marketplace add MichaelPrutkow/anki-for-claude
@@ -59,11 +65,31 @@ there's nothing else to install. On older Anki (23.10+), get [uv](https://docs.a
 
 Desktop app: *Customize → Plugins → Add → Add marketplace*, enter `MichaelPrutkow/anki-for-claude`.
 
-Then say "check my Anki setup". First start takes up to a minute while dependencies download.
-In the desktop app, add a folder to the chat first, otherwise it doesn't reliably reach the server.
+Then say "check my Anki setup". First start takes up to a minute while the dependencies download.
 
-**Back up your collection first** (*File → Export → Anki Collection Package*). This writes to the
-real thing.
+
+It's recommended to **back up your collection first** (*File → Export → Anki Collection Package*).
+This writes to your real collection.
+
+## Other MCP clients
+
+The server also works without the plugin (Cursor etc.). You get the tools, not the skills.
+
+```bash
+git clone https://github.com/MichaelPrutkow/anki-for-claude.git
+cd anki-for-claude && uv sync --no-dev
+```
+
+```json
+{
+  "mcpServers": {
+    "anki": {
+      "command": "uv",
+      "args": ["run", "--directory", "/absolute/path/to/anki-for-claude", "--no-dev", "-m", "anki_mcp"]
+    }
+  }
+}
+```
 
 ## Usage
 
@@ -96,10 +122,10 @@ and PDFs. Edits to foreign notes need your OK.
 
 ## Privacy
 
-Runs on your machine, nothing goes to me. It talks to AnkiConnect on `127.0.0.1`. Drafts and the
-undo journal live in `~/.anki-mcp`, pictures in `~/Pictures/Anki for Claude`. Only when you ask:
-a video id goes to YouTube, an image URL gets fetched, Anki syncs to AnkiWeb. Full version in
-[PRIVACY.md](PRIVACY.md).
+Everything runs on your machine, nothing goes to me. It talks to AnkiConnect on `127.0.0.1`.
+Drafts and the undo journal live in `~/.anki-mcp`, pictures in `~/Pictures/Anki for Claude`. Only
+when you ask: a video id goes to YouTube, an image URL gets fetched, Anki syncs to AnkiWeb. Full
+version in [PRIVACY.md](PRIVACY.md).
 
 ## Known limits
 
@@ -110,25 +136,6 @@ a video id goes to YouTube, an image URL gets fetched, Anki syncs to AnkiWeb. Fu
 - Deleting can't be undone. Fix the card instead.
 - Image occlusion is rectangles only.
 
-## Other MCP clients
-
-The server also works without the plugin (Cursor etc.). You get the tools, not the skills.
-
-```bash
-git clone https://github.com/MichaelPrutkow/anki-for-claude.git
-cd anki-for-claude && uv sync --no-dev
-```
-
-```json
-{
-  "mcpServers": {
-    "anki": {
-      "command": "uv",
-      "args": ["run", "--directory", "/absolute/path/to/anki-for-claude", "--no-dev", "-m", "anki_mcp"]
-    }
-  }
-}
-```
 
 ## Development
 
