@@ -2,10 +2,10 @@
   "name": "anki",
   "displayName": "Anki Flashcards",
   "version": "2.2.0",
-  "description": "Create and improve Anki flashcards with Claude: card-writing rules, drafts you approve in the chat, pictures and image occlusion, and statistics on the cards you struggle with. Unofficial, not affiliated with Ankitects.",
+  "description": "Anki cards from your lecture material, with pictures, image occlusion and a fix for the cards you keep failing. You approve every card in the chat. Unofficial, not affiliated with Ankitects.",
   "author": {
     "name": "Michael Prutkow",
-    "url": "https://github.com/MichaelPrutkow"
+    "url": "https://prutkow.com"
   },
   "license": "MIT",
   "keywords": [

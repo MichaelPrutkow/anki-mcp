@@ -1,6 +1,6 @@
 ---
 name: visuals
-description: Adds pictures to Anki cards - graphs, trees and automata drawn with Graphviz, figures cut out of PDFs, matplotlib plots, and image occlusion cards that hide the labels of a diagram. Use when a card is about something drawn in the lecture or exam (graph algorithms, heaps, automata, plots, circuits, anatomy, any labelled diagram), or when the user asks for images or image occlusion.
+description: Adds pictures to Anki cards - graphs, trees and automata drawn with Graphviz, figures cut out of PDFs, matplotlib plots, and image occlusion cards that hide the labels of a diagram. Use when a card is about something drawn in the lecture or exam (graph algorithms, heaps, automata, plots, circuits, anatomy, any labelled diagram) even if the user did not ask for a picture, and whenever the user asks for images or image occlusion. Where the picture carries the card; a crop from the slides is often enough.
 ---
 
 # Cards with pictures
@@ -15,7 +15,9 @@ If the exam shows it as a picture, the card shows a picture. A DFS order asked o
 - Anatomy, pathways and any labelled diagram: use image occlusion.
 - A figure from the lecture or a past exam: cut it out instead of describing it.
 
-Keep text cards for definitions, statements and reasons. A picture has to carry information, not decorate.
+Keep text cards for definitions, statements and reasons. A picture has to carry information, not decorate. You don't need to be asked: if a past exam or the lecture centres on a diagram, make the picture card yourself. Not every card needs one, a few per lecture is typical. These are guidelines, so use judgment.
+
+Check the source first: if the slides or exam already contain the diagram you need, a crop (`pdf_figures` + `stage_image`) is enough. Don't write a script to redraw what exists.
 
 ## How images work
 

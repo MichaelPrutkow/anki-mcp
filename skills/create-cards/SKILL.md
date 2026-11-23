@@ -13,7 +13,7 @@ If `overview` and the other anki tools are not among your tools, call `get_devic
 
 1. **Read the source** and decide what is worth remembering (see below). Read a YouTube video with `youtube_transcript`.
 2. **Call `overview`** once per conversation. Use deck names and field names exactly as it lists them. If the target deck already has cards on the topic, check with `search_notes` so you do not write the same card in other words; `draft_add` flags only cards that read almost like an existing one.
-3. **Write the cards** by the rules below, then go through the checklist at the end. Rewrite or drop every card that fails. Decide for each card whether a picture carries it better (see below); if so, make the picture first, so the card goes into the draft with it. Cards with formulas: read `math.md` in this skill's folder first.
+3. **Write the cards** by the rules below, then go through the checklist at the end. Rewrite or drop every card that fails. Then do a picture pass (see "Pictures: look for them, don't spam them" below): make the pictures for the few cards that need one first, so those cards go into the draft with them. Cards with formulas: read `math.md` in this skill's folder first.
 4. **Call `draft_add`** with up to 50 cards; for more, call it again with the returned `draft_id`. It checks the cards against Anki and keeps them in a draft. Nothing reaches Anki yet.
    - Cards with LaTeX go in as `cards_text`, plain text that keeps every backslash as you type it.
    - Tags given to `draft_add` go on the cards of that call, and a new draft gives them to its later cards too.
@@ -29,7 +29,19 @@ If `overview` and the other anki tools are not among your tools, call `get_devic
 
 Drafts are kept on the user's computer for 14 days. `draft_show` without an id lists them, so a draft can be continued in a later chat.
 
-If the lecture or exam shows something as a drawing (a graph, tree, heap, automaton, circuit, plot, diagram or labelled figure), the card shows a drawing too. Read the `visuals` skill before writing such a card. A PDF with figures is a hint to call `pdf_figures` on its pages.
+## Pictures: look for them, don't spam them
+
+Do not wait for the user to ask for pictures. After writing the cards, go through the source once more and look for the few places where a picture is the better card. A picture earns its place when:
+
+- the exam asks about a specific diagram, or past exams show one (a graph traversal, an automaton, a labelled anatomy figure, a circuit, a plot),
+- the topic can't really be understood without seeing it (a geometric meaning, a data structure mid-operation, a pathway),
+- the lecture figure is the thing to remember and describing it in words would be worse.
+
+Most cards stay text, and a lecture usually needs only a few picture cards. Don't add one just to decorate or to fill a quota. But when the exam would show it as a picture, or the picture clearly makes the card better, go for it; a good picture card is worth more than another text card.
+
+The right picture often already exists in the slides or a past exam. Then cut it out with `pdf_figures` and `stage_image` instead of drawing your own. That's cheaper and usually better, and it matches what the user will see in the exam. Draw it yourself (Graphviz, matplotlib) when nothing usable exists or you need a front and back version. These are guidelines, not hard rules: use your judgment, and an exception is fine when it serves the card.
+
+If you added pictures on your own, mention it in one sentence when you show the cards, so the user can drop any they don't want. Read the `visuals` skill before making one. A PDF with figures is a hint to call `pdf_figures` on its pages.
 
 ## What deserves a card
 
