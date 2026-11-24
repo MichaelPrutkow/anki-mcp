@@ -8,7 +8,7 @@ Changes for the Anthropic plugin directory.
   needs Apple's Command Line Tools, which most people already have for git.
 - AnkiConnect's `apiKey` is no longer supported, and `ANKI_CONNECT_API_KEY` is gone. An `apiKey` set in
   AnkiConnect gets an error message that says how to clear it.
-- The script that lists MathJax's macros moved from `scripts/` into CONTRIBUTING.md.
+- The script that lists MathJax's macros is no longer in the plugin; CONTRIBUTING.md says how to get it.
 - `plugin.json` names the icon for the directory listing.
 
 ## 3.0.2 (2026-11-24)
