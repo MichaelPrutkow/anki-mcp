@@ -17,15 +17,15 @@ for python in \
     "$HOME/Library/Application Support/AnkiProgramFiles/.venv/bin/python" \
     "${XDG_DATA_HOME:-$HOME/.local/share}/AnkiProgramFiles/.venv/bin/python"; do
     [ -x "$python" ] || continue
-    venv="${CLAUDE_PLUGIN_DATA:-$HOME/.anki-for-claude}/venv"
+    venv="${CLAUDE_PLUGIN_DATA:-$HOME/.anki-mcp}/venv"
     if ! cmp -s "$root/requirements.txt" "$venv/requirements.txt"; then
-        echo "anki-for-claude: installing dependencies into $venv (first start only)" >&2
+        echo "anki-mcp: installing dependencies into $venv (first start only)" >&2
         rm -rf "$venv"
         if ! "$python" -m venv "$venv" >&2 ||
             ! "$venv/bin/python" -m pip install --quiet --disable-pip-version-check --require-hashes \
                 --only-binary :all: -r "$root/requirements.txt" >&2; then
             rm -rf "$venv"
-            echo "anki-for-claude: could not install the dependencies with Anki's Python. Install uv instead." >&2
+            echo "anki-mcp: could not install the dependencies with Anki's Python. Install uv instead." >&2
             exit 1
         fi
         cp "$root/requirements.txt" "$venv/requirements.txt"
@@ -33,5 +33,5 @@ for python in \
     PYTHONPATH="$root/src" exec "$venv/bin/python" "$root/server.py"
 done
 
-echo "anki-for-claude: found neither uv nor Anki's own Python. Install Anki 25.07 or newer, or uv." >&2
+echo "anki-mcp: found neither uv nor Anki's own Python. Install Anki 25.07 or newer, or uv." >&2
 exit 1

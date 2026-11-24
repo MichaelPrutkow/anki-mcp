@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import tomllib
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -52,7 +53,7 @@ WEB_READ = _annotations(True, False, True, web=True)
 SYNC = _annotations(False, False, True, web=True)
 
 
-ANKI_CONNECT_URL = "http://127.0.0.1:8765"
+DEFAULT_ANKI_CONNECT_URL = "http://127.0.0.1:8765"
 
 
 @dataclass
@@ -80,14 +81,22 @@ async def lifespan(server: MCPServer) -> AsyncGenerator[App, None]:
 
     data_dir = Path.home() / ".anki-mcp"
     data_dir.mkdir(parents=True, exist_ok=True)
+    pictures = Path.home() / "Pictures" / "Anki MCP"
+    old_pictures = Path.home() / "Pictures" / "Anki for Claude"  # the folder's name before version 3
+    if old_pictures.is_dir() and not pictures.exists():
+        old_pictures.rename(pictures)
     async with httpx.AsyncClient(timeout=30.0) as http:
-        anki = AnkiClient(http, ANKI_CONNECT_URL)
+        anki = AnkiClient(
+            http,
+            os.environ.get("ANKI_CONNECT_URL") or DEFAULT_ANKI_CONNECT_URL,
+            os.environ.get("ANKI_CONNECT_API_KEY") or None,
+        )
         yield App(
             anki=anki,
             note_types=NoteTypes(anki),
             drafts=DraftStore(data_dir / "drafts"),
             journal=Journal(data_dir / "journal.jsonl"),
-            images=ImageStore(Path.home() / "Pictures" / "Anki for Claude"),
+            images=ImageStore(pictures),
         )
 
 
@@ -117,7 +126,7 @@ class AnkiServer(MCPServer):
 
 def _version() -> str:
     try:
-        return version("anki-for-claude")
+        return version("anki-mcp")
     except PackageNotFoundError:
         # Started from the source folder with Anki's Python (scripts/start-server.sh), not installed by uv.
         with (Path(__file__).parents[2] / "pyproject.toml").open("rb") as f:

@@ -10,7 +10,7 @@ This is the most expensive way to make cards, and it runs on the user's usage li
 
 Work in a run folder `anki-run/<date>/` in the current project. Every step reads and writes files there; keep only short summaries in the conversation.
 
-If `overview` and the other anki tools are not among your tools, call `get_device_info` (search for it if it is not loaded) and search for the anki tools again. The anki tools run on the user's computer, so they only exist in a local session, not in a web session. If the tools are still missing, ask the user to work locally (a local session in the Claude app or Claude Code) and send the request again. Only if that does not help either, follow the `check-setup` skill.
+If `overview` and the other anki tools are not among your tools, call `get_device_info` (search for it if it is not loaded) and search for the anki tools again. If they are still missing, follow step 1 of the `check-setup` skill.
 
 1. **Intake.** Ask once for whatever is missing: target deck, the sources, exam date, a rough card budget, language.
 2. **Plan the cost.** Count the sources and their pages, then pick a mode:

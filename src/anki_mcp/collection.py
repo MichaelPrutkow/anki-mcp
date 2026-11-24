@@ -13,7 +13,8 @@ from anki_mcp.server import BATCH_PREFIX, CREATED_TAG, OVERWRITES, READ_ONLY, ST
 from anki_mcp.text import lint, repair, strip_html, to_markdown, truncate
 
 MAX_EXPORT = 2000
-EXPORT_MARK = "<!-- Exported from Anki by anki-for-claude."
+EXPORT_MARK = "<!-- Exported from Anki by anki-mcp."
+OLD_EXPORT_MARK = "<!-- Exported from Anki by anki-for-claude."  # before version 3
 EDIT_SLACK = 60  # seconds between adding a note and a change that counts as the user's edit
 
 
@@ -149,7 +150,8 @@ def _export_path(save_to: str) -> Path:
         raise ToolError(f"'{save_to}': save_to needs an absolute path on the user's computer ending in .md.")
     if not path.parent.is_dir():
         raise ToolError(f"The folder {path.parent} does not exist.")
-    if path.exists() and not path.read_text(encoding="utf-8", errors="replace").startswith(EXPORT_MARK):
+    ours = (EXPORT_MARK, OLD_EXPORT_MARK)
+    if path.exists() and not path.read_text(encoding="utf-8", errors="replace").startswith(ours):
         raise ToolError(f"{path} exists and was not written by this tool. Pick another file name.")
     return path
 
@@ -280,9 +282,10 @@ async def delete_notes(
     ctx: Ctx,
     note_ids: Annotated[list[int], Field(min_length=1, max_length=100)],
 ) -> str:
-    """Delete notes created by this plugin, with their review history. This cannot be undone.
+    """Delete notes created by this plugin. Their review history is lost for good.
 
-    Only for cards that should not exist at all; fix wrong cards with update_notes instead.
+    Only for cards that should not exist at all; fix wrong cards with update_notes instead. Returns a batch id:
+    undo adds the notes back with their fields, tags and deck, but without the review history.
     """
     a = app(ctx)
     infos = await a.anki.invoke("notesInfo", notes=note_ids)
@@ -295,8 +298,27 @@ async def delete_notes(
         if foreign:
             lines.append(f"Written by the user, so this plugin does not delete them: {foreign}")
         raise ToolError("\n".join(lines))
+    # Keep what undo needs to add the notes back: fields, tags and the deck of each note's first card.
+    first_cards = [info["cards"][0] if info.get("cards") else None for info in infos]
+    card_infos = await a.anki.invoke("cardsInfo", cards=[c for c in first_cards if c is not None])
+    deck_of = {card["cardId"]: card["deckName"] for card in card_infos if card}
+    deleted = [
+        {
+            "note_id": info["noteId"],
+            "deck": deck_of.get(card, "Default"),
+            "note_type": info["modelName"],
+            "fields": {name: field["value"] for name, field in info["fields"].items()},
+            "tags": info["tags"],
+        }
+        for info, card in zip(infos, first_cards, strict=True)
+    ]
     await a.anki.invoke("deleteNotes", notes=note_ids)
-    return f"Deleted {len(note_ids)} {'note' if len(note_ids) == 1 else 'notes'}."
+    batch_id = uuid4().hex[:8]
+    a.journal.append({"batch_id": batch_id, "kind": "delete", "deleted": deleted})
+    return (
+        f'Deleted {_count(len(note_ids), "note")}. Batch id {batch_id}: undo("{batch_id}") adds '
+        f"{'it' if len(note_ids) == 1 else 'them'} back, without the review history."
+    )
 
 
 async def _undo_commit(a: App, batch_id: str, force: bool, known: bool) -> tuple[str, list[int]]:
@@ -322,6 +344,40 @@ async def _undo_commit(a: App, batch_id: str, force: bool, known: bool) -> tuple
             "too, review history included: ask the user first."
         )
     return message, kept
+
+
+async def _undo_delete(a: App, batch_id: str, entry: dict[str, Any]) -> str:
+    """Add deleted notes back as new notes: same fields, tags and deck, but no review history."""
+    notes = entry["deleted"]
+    decks = set(await a.anki.invoke("deckNames"))
+    for deck in sorted({note["deck"] for note in notes} - decks):
+        await a.anki.invoke("createDeck", deck=deck)
+    calls = [
+        (
+            "addNote",
+            {
+                "note": {
+                    "deckName": note["deck"],
+                    "modelName": note["note_type"],
+                    "fields": note["fields"],
+                    "tags": note["tags"],
+                    "options": {"allowDuplicate": True},
+                }
+            },
+        )
+        for note in notes
+    ]
+    results = await a.anki.multi(calls)
+    added = [result for result in results if isinstance(result, int)]
+    message = f"Undid batch {batch_id}: added {_count(len(added), 'deleted note')} back, without review history."
+    failed = [
+        f"{note['note_id']}: {result}"
+        for note, result in zip(notes, results, strict=True)
+        if not isinstance(result, int)
+    ]
+    if failed:
+        message += " Could not add back: " + "; ".join(failed)
+    return message
 
 
 async def _undo_styling(a: App, batch_id: str, entry: dict[str, Any]) -> str:
@@ -351,8 +407,8 @@ async def undo(
         Field(description="Commits only: also delete notes studied or edited since, with their history. Ask first"),
     ] = False,
 ) -> str:
-    """Revert a draft_commit, update_notes or math_css by its batch id: added notes are deleted, changed fields and
-    styling restored.
+    """Revert a draft_commit, update_notes, delete_notes or math_css by its batch id: added notes are deleted,
+    changed fields and styling restored, deleted notes added back without their review history.
 
     Notes the user studied or edited since are left alone and listed.
     """
@@ -372,6 +428,8 @@ async def undo(
         message, kept = await _undo_commit(a, batch_id, force, known=entry is not None or bool(undone))
     elif entry["kind"] == "styling":
         message = await _undo_styling(a, batch_id, entry)
+    elif entry["kind"] == "delete":
+        message = await _undo_delete(a, batch_id, entry)
     else:
         updates = entry["updated"]
         infos = await a.anki.invoke("notesInfo", notes=[u["note_id"] for u in updates])
@@ -393,7 +451,8 @@ async def undo(
     return message
 
 
-MATH_CSS_MARK = "/* anki-for-claude: long formulas"
+MATH_CSS_MARK = "/* anki-mcp: long formulas"
+OLD_MATH_CSS_MARK = "/* anki-for-claude: long formulas"  # before version 3
 MATH_CSS = f"""
 {MATH_CSS_MARK} scroll sideways instead of running off the card on a phone */
 mjx-container[display="true"] {{
@@ -403,7 +462,7 @@ mjx-container[display="true"] {{
   padding: 0.5em 0;
   margin: 0.5em 0 !important; /* half of MathJax's 1em moves inside, so tall formulas are not cut off */
 }}
-/* end anki-for-claude */
+/* end anki-mcp */
 """
 
 
@@ -420,7 +479,7 @@ async def math_css(
     styled, already = [], []
     for name in note_types:
         before = (await a.anki.invoke("modelStyling", modelName=name))["css"]
-        if MATH_CSS_MARK in before:
+        if MATH_CSS_MARK in before or OLD_MATH_CSS_MARK in before:
             already.append(name)
             continue
         await a.anki.invoke("updateModelStyling", model={"name": name, "css": before.rstrip() + "\n" + MATH_CSS})

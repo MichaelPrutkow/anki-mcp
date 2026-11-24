@@ -300,7 +300,7 @@
   {
    "name": "delete_notes",
    "title": "Delete notes",
-   "description": "Delete notes created by this plugin, with their review history. This cannot be undone.\n\nOnly for cards that should not exist at all; fix wrong cards with update_notes instead.\n",
+   "description": "Delete notes created by this plugin. Their review history is lost for good.\n\nOnly for cards that should not exist at all; fix wrong cards with update_notes instead. Returns a batch id:\nundo adds the notes back with their fields, tags and deck, but without the review history.\n",
    "inputSchema": {
     "properties": {
      "note_ids": {
@@ -329,7 +329,7 @@
   {
    "name": "undo",
    "title": "Undo a batch",
-   "description": "Revert a draft_commit, update_notes or math_css by its batch id: added notes are deleted, changed fields and\nstyling restored.\n\nNotes the user studied or edited since are left alone and listed.\n",
+   "description": "Revert a draft_commit, update_notes, delete_notes or math_css by its batch id: added notes are deleted,\nchanged fields and styling restored, deleted notes added back without their review history.\n\nNotes the user studied or edited since are left alone and listed.\n",
    "inputSchema": {
     "properties": {
      "batch_id": {

@@ -1,10 +1,12 @@
 import asyncio
 import difflib
+import shutil
 import sys
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 import httpx
 from mcp.server.mcpserver.exceptions import ToolError
@@ -22,9 +24,10 @@ class AnkiTimeout(AnkiError):
 
 
 class AnkiClient:
-    def __init__(self, http: httpx.AsyncClient, url: str):
+    def __init__(self, http: httpx.AsyncClient, url: str, api_key: str | None = None):
         self._http = http
         self._url = url
+        self._key = api_key  # AnkiConnect's optional apiKey setting
         self._launch_lock = asyncio.Lock()
 
     async def invoke(self, action: str, *, timeout: float = 30.0, **params: Any) -> Any:
@@ -33,7 +36,7 @@ class AnkiClient:
 
     async def multi(self, calls: list[tuple[str, dict[str, Any]]], *, timeout: float = 50.0) -> list[Any]:
         """Several actions in one request. Failed actions come back as AnkiError instead of raising."""
-        actions = [{"action": a, "version": API_VERSION, "params": p} for a, p in calls]
+        actions = [self._with_key({"action": a, "version": API_VERSION, "params": p}) for a, p in calls]
         results = await self.invoke("multi", timeout=timeout, actions=actions)
         out: list[Any] = []
         for (action, _), item in zip(calls, results, strict=True):
@@ -50,9 +53,12 @@ class AnkiClient:
             await self._ensure_running()
             return await self._send(payload, timeout)
 
+    def _with_key(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {**payload, "key": self._key} if self._key else payload
+
     async def _send(self, payload: dict[str, Any], timeout: float) -> Any:
         try:
-            response = await self._http.post(self._url, json=payload, timeout=timeout)
+            response = await self._http.post(self._url, json=self._with_key(payload), timeout=timeout)
         except httpx.TimeoutException:
             raise AnkiTimeout(
                 "Anki did not answer in time. Usually a dialog window is open in Anki: ask the user to close it."
@@ -66,14 +72,27 @@ class AnkiClient:
         async with self._launch_lock:
             if await self._is_up():
                 return
-            if sys.platform != "darwin":
-                raise AnkiError(
-                    "AnkiConnect does not answer. Ask the user to start Anki and to check that the AnkiConnect "
-                    "add-on is installed."
+            not_running = (
+                f"AnkiConnect does not answer at {self._url}. Ask the user to start Anki and to check that the "
+                "AnkiConnect add-on is installed."
+            )
+            if urlsplit(self._url).hostname not in ("127.0.0.1", "localhost", "::1"):
+                raise AnkiError(not_running)  # Anki runs on another computer, which this one cannot start
+            if sys.platform == "darwin":
+                process = await asyncio.create_subprocess_exec("open", "-ga", "Anki")
+                if await process.wait() != 0:
+                    raise AnkiError("Anki is not installed, or macOS could not start it. Ask the user to start it.")
+            elif sys.platform.startswith("linux") and (anki := shutil.which("anki")):
+                # Anki keeps running after this server stops, and its output must not reach stdout (MCP's channel).
+                await asyncio.create_subprocess_exec(
+                    anki,
+                    stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                    start_new_session=True,
                 )
-            process = await asyncio.create_subprocess_exec("open", "-ga", "Anki")
-            if await process.wait() != 0:
-                raise AnkiError("Anki is not installed, or macOS could not start it. Ask the user to start it.")
+            else:
+                raise AnkiError(not_running)
             for _ in range(LAUNCH_WAIT_SECONDS):
                 await asyncio.sleep(1)
                 if await self._is_up():
@@ -114,6 +133,12 @@ def _unwrap(action: str, body: Any) -> Any:
     if not isinstance(body, dict) or "result" not in body or "error" not in body:
         raise AnkiError(f"{action}: unexpected response from AnkiConnect")
     if body["error"] is not None:
+        if "api key" in str(body["error"]).lower():
+            raise AnkiError(
+                f"{action}: AnkiConnect needs an API key. Set the environment variable ANKI_CONNECT_API_KEY to the "
+                "apiKey in AnkiConnect's settings (in Anki: Tools > Add-ons > AnkiConnect > Config), then restart "
+                "Claude."
+            )
         raise AnkiError(f"{action}: {body['error']}")
     return body["result"]
 

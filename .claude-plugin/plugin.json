@@ -1,10 +1,11 @@
 {
   "name": "anki",
-  "displayName": "Anki Flashcards",
-  "version": "2.2.0",
-  "description": "Anki cards from your lecture material, with pictures, image occlusion and a fix for the cards you keep failing. You approve every card in the chat. Unofficial, not affiliated with Ankitects.",
+  "displayName": "Anki MCP",
+  "version": "3.0.0",
+  "description": "Anki cards from your slides, PDFs and videos, with real pictures: graphs, PDF figures, plots and image occlusion. Finds and fixes the cards you keep failing. Nothing reaches your collection until you say so. Unofficial, not affiliated with Ankitects.",
   "author": {
     "name": "Michael Prutkow",
+    "email": "michael.prutkow@tum.de",
     "url": "https://prutkow.com"
   },
   "license": "MIT",
@@ -15,11 +16,11 @@
     "image-occlusion",
     "study"
   ],
-  "homepage": "https://github.com/MichaelPrutkow/anki-for-claude",
-  "repository": "https://github.com/MichaelPrutkow/anki-for-claude",
-  "documentationUrl": "https://github.com/MichaelPrutkow/anki-for-claude#readme",
-  "supportUrl": "https://github.com/MichaelPrutkow/anki-for-claude/issues",
-  "privacyPolicyUrl": "https://github.com/MichaelPrutkow/anki-for-claude/blob/main/PRIVACY.md",
+  "homepage": "https://github.com/MichaelPrutkow/anki-mcp",
+  "repository": "https://github.com/MichaelPrutkow/anki-mcp",
+  "documentationUrl": "https://github.com/MichaelPrutkow/anki-mcp#readme",
+  "supportUrl": "https://github.com/MichaelPrutkow/anki-mcp/issues",
+  "privacyPolicyUrl": "https://prutkow.com/anki-mcp/privacy/",
   "mcpServers": {
     "anki": {
       "command": "/bin/sh",

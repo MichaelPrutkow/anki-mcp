@@ -3,13 +3,14 @@
   "description": "Claude plugins by Michael Prutkow",
   "owner": {
     "name": "Michael Prutkow",
+    "email": "michael.prutkow@tum.de",
     "url": "https://prutkow.com"
   },
   "plugins": [
     {
       "name": "anki",
       "source": "./",
-      "description": "Anki cards from your material, with pictures and image occlusion. You approve every card."
+      "description": "Anki cards from your material, with real pictures and image occlusion. Nothing reaches your collection until you say so."
     }
   ]
 }

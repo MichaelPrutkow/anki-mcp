@@ -8,8 +8,8 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "anki-for-claude"
-version = "2.2.0"
+name = "anki-mcp"
+version = "3.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },

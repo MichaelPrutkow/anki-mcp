@@ -1,0 +1,11 @@
+name: Idea
+description: A feature or a change you would like.
+labels: [idea]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: Idea
+      description: What you want to do with your cards, and what is missing or in the way today.
+    validations:
+      required: true

@@ -5,7 +5,7 @@ description: Works on the user's existing Anki cards - searches the collection, 
 
 # Improving existing cards
 
-If `overview` and the other anki tools are not among your tools, call `get_device_info` (search for it if it is not loaded) and search for the anki tools again. The anki tools run on the user's computer, so they only exist in a local session, not in a web session. If the tools are still missing, ask the user to work locally (a local session in the Claude app or Claude Code) and send the request again. Only if that does not help either, follow the `check-setup` skill.
+If `overview` and the other anki tools are not among your tools, call `get_device_info` (search for it if it is not loaded) and search for the anki tools again. If they are still missing, follow step 1 of the `check-setup` skill.
 
 ## Finding cards
 
@@ -66,10 +66,9 @@ No hits usually means the query is malformed, not that nothing matches.
 
 ## Deleting
 
-Delete a card only when it should not exist at all, and ask the user first. `delete_notes` removes only notes this plugin created, takes their review history with them and cannot be undone.
+Delete a card only when it should not exist at all, and ask the user first. `delete_notes` removes only notes this plugin created, and their review history is lost for good. Its batch id brings the content back with `undo`, but not the history.
 
 ## Undoing
 
-- `draft_commit`, `update_notes` and `math_css` return a batch id. `undo` with that id deletes the notes a commit added, restores the fields an update changed, or removes the formula CSS.
+- `draft_commit`, `update_notes`, `delete_notes` and `math_css` return a batch id. `undo` with that id deletes the notes a commit added, restores the fields an update changed, adds deleted notes back as new cards, or removes the formula CSS.
 - Notes the user studied or edited since are left alone and listed. For a commit, `undo` with `force=true` deletes them too, review history included: only when the user says so.
-- Deleting cannot be undone.

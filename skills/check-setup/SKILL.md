@@ -19,8 +19,9 @@ Go through the steps in order. Stop at the first one that fails, explain the fix
    - It lists decks and note types: both work.
    - "does not answer" or "not running": Anki is closed or AnkiConnect is missing. The user opens Anki. If that is not enough, they install AnkiConnect in Anki under Tools > Add-ons > Get Add-ons... with the code `2055492159` and restart Anki.
    - "did not answer in time": a window is waiting in Anki, often the profile chooser or a sync question. The user closes it. If the profile chooser comes up every time, they can open their profile once and let Anki remember it.
+   - "needs an API key": the user has set an `apiKey` in AnkiConnect's config. They set the environment variable `ANKI_CONNECT_API_KEY` to the same value and restart Claude, or remove the key in Anki under Tools > Add-ons > AnkiConnect > Config.
 3. **Image Occlusion** (only for image occlusion cards). `overview` lists a note type marked `[image occlusion]`. If there is none: it needs Anki 23.10 or newer; then the user adds it in Anki under Tools > Manage Note Types > Add > "Add: Image Occlusion".
-4. **Graphviz** (only for drawn graphs). `overview` says so when Graphviz is missing. The user installs it with `brew install graphviz` on macOS, `winget install graphviz` on Windows, or the `graphviz` package on Linux.
+4. **Graphviz** (only for drawn graphs). `overview` says so when Graphviz is missing. The user installs it with `brew install graphviz` on macOS or the `graphviz` package on Linux.
 5. **Phone** (only if the user studies on a phone). Call `sync`. If it fails, the user logs in to AnkiWeb in Anki under Tools > Preferences > Syncing.
 6. **Formulas on a phone** (only if the user's cards have formulas and they study on a phone). Anki never breaks a formula across lines, so a long one runs off a phone screen. Offer `math_css` for the note types the user writes cards with, usually Basic and Cloze as `overview` names them. It changes only their styling: a formula wider than the screen then scrolls sideways. Call it only after the user agrees; `undo` with the returned batch id removes it again.
 

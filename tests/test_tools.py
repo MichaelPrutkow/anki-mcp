@@ -10,11 +10,12 @@ from fake_anki import FakeAnki
 from mcp.client import Client
 from PIL import Image, ImageDraw
 
+from anki_mcp.server import mcp
 from anki_mcp.text import lint, readable
 
 pytestmark = pytest.mark.anyio
 
-IMAGES = Path("Pictures/Anki for Claude")
+IMAGES = Path("Pictures/Anki MCP")
 
 
 async def call(client: Client, tool: str, **args: Any) -> str:
@@ -434,3 +435,29 @@ async def test_stats_looks_at_the_clearest_cards_first(client: Client, anki: Fak
     anki.clearest_cards = [5]
     text = await call(client, "stats", scope="deck:Math", weak_limit=3)
     assert "400 candidates, ranked the 300 with the clearest signal" in text
+
+
+async def test_deleted_notes_come_back_with_undo(client: Client, anki: FakeAnki) -> None:
+    text = await call(client, "draft_add", cards=[BASIC], deck="Math::Analysis", note_type="Basic", tags=["la"])
+    await call(client, "draft_commit", draft_id=draft_id(text))
+    (nid,) = anki.notes
+    text = await call(client, "delete_notes", note_ids=[nid])
+    assert not anki.notes and "without the review history" in text
+    del anki.decks["Math::Analysis"]
+
+    assert "added 1 deleted note back" in await call(client, "undo", batch_id=batch_id(text))
+    (note,) = anki.notes.values()
+    assert note["deck"] == "Math::Analysis"
+    assert note["fields"]["Front"]["value"] == BASIC["fields"]["Front"]
+    assert "la" in note["tags"] and "mcp::created" in note["tags"]
+    assert "already undone" in await fails(client, "undo", batch_id=batch_id(text))
+
+
+async def test_the_old_pictures_folder_is_taken_over(anki: FakeAnki, tmp_path: Path) -> None:
+    old = tmp_path / "Pictures" / "Anki for Claude"
+    old.mkdir(parents=True)
+    (old / "herz.png").write_bytes(b"png")
+    async with Client(mcp) as client:
+        await client.list_tools()
+    assert (tmp_path / IMAGES / "herz.png").read_bytes() == b"png"
+    assert not old.exists()

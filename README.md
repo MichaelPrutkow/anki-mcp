@@ -2,7 +2,7 @@
   <img src=".claude-plugin/icon.png" alt="" width="96">
 </p>
 
-<h1 align="center">Anki for Claude</h1>
+<h1 align="center">Anki MCP</h1>
 
 <p align="center">
   Anki cards with real pictures, written by Claude: graphs, PDF figures, plots and image occlusion,
@@ -10,26 +10,26 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/MichaelPrutkow/anki-mcp/actions/workflows/tests.yml"><img alt="Tests" src="https://github.com/MichaelPrutkow/anki-mcp/actions/workflows/tests.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Anki 23.10+" src="https://img.shields.io/badge/Anki-23.10%2B-orange">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11%2B-3776AB">
 </p>
 
-When I ask Claude for an `.apkg` or a `.csv`, I get text-only cards, because it can't get a picture into
-either. This plugin talks to Anki directly, so a card about a graph algorithm shows the graph and
-a card about a lecture figure shows the figure. It works from slides, PDFs, YouTube videos or
-whatever you paste in. Nothing lands in your collection until you say yes, unless you turn off approval
-and let it autocommit. That saves output tokens and lets you automate the whole thing, e.g. with
-scheduled tasks, no human in the loop.
+When I ask Claude for an `.apkg` or a `.csv`, I get text-only cards. This plugin talks to Anki
+directly, so a card about a graph algorithm shows the graph and a card about a lecture figure shows
+the figure. It works from slides, PDFs, YouTube videos or whatever you paste in. Nothing lands in
+your collection until you say yes, unless you turn off approval and let it commit directly. That
+saves output tokens and lets you automate the whole thing, e.g. with scheduled tasks, no human in
+the loop.
 
 > Unofficial. Not affiliated with Ankitects.
+
+*Both demos are from an older version, before picture support.*
 
 https://github.com/user-attachments/assets/68d1f24f-7f6c-480d-aa16-c312484f873b
 
 https://github.com/user-attachments/assets/00ac5217-9e81-4b8c-8479-c9aa38729dc4
-
-***Old version, prior to picture support (Opus 5 was the hottest model back then)***
-
 
 ## What it does
 
@@ -54,19 +54,20 @@ You need macOS or Linux, Anki with [AnkiConnect](https://ankiweb.net/shared/info
 needs nothing else. On older versions (23.10+) install [uv](https://docs.astral.sh/uv/).
 [Graphviz](https://graphviz.org/download/) is optional, only for graphs.
 
-Add my marketplace, `MichaelPrutkow/anki-for-claude` ([repo link](https://github.com/MichaelPrutkow/anki-for-claude)), and install from it.
+Add my marketplace, [`MichaelPrutkow/anki-mcp`](https://github.com/MichaelPrutkow/anki-mcp), and
+install the plugin from it.
 
 Claude Code:
 
 ```
-/plugin marketplace add MichaelPrutkow/anki-for-claude
+/plugin marketplace add MichaelPrutkow/anki-mcp
 /plugin install anki@michaelprutkow
 ```
 
-Desktop app: *Customize → Plugins → Add → Add marketplace*, enter `MichaelPrutkow/anki-for-claude`.
+Desktop app: *Customize → Plugins → Add → Add marketplace*, enter `MichaelPrutkow/anki-mcp`.
 
-Then say "check my Anki setup". First start takes up to a minute while the dependencies download.
-
+Then say "check my Anki setup". The first start takes up to a minute while the dependencies
+download.
 
 It's recommended to **back up your collection first** (*File → Export → Anki Collection Package*).
 This writes to your real collection.
@@ -76,8 +77,8 @@ This writes to your real collection.
 The server also works without the plugin (Cursor etc.). You get the tools, not the skills.
 
 ```bash
-git clone https://github.com/MichaelPrutkow/anki-for-claude.git
-cd anki-for-claude && uv sync --no-dev
+git clone https://github.com/MichaelPrutkow/anki-mcp.git
+cd anki-mcp && uv sync --no-dev
 ```
 
 ```json
@@ -85,11 +86,20 @@ cd anki-for-claude && uv sync --no-dev
   "mcpServers": {
     "anki": {
       "command": "uv",
-      "args": ["run", "--directory", "/absolute/path/to/anki-for-claude", "--no-dev", "-m", "anki_mcp"]
+      "args": ["run", "--directory", "/absolute/path/to/anki-mcp", "--no-dev", "-m", "anki_mcp"]
     }
   }
 }
 ```
+
+## Settings
+
+Most setups need none. Both are environment variables of the server:
+
+| Variable | For |
+| --- | --- |
+| `ANKI_CONNECT_URL` | AnkiConnect on another address than `http://127.0.0.1:8765` |
+| `ANKI_CONNECT_API_KEY` | the `apiKey` you set in AnkiConnect's config |
 
 ## Usage
 
@@ -103,7 +113,8 @@ cd anki-for-claude && uv sync --no-dev
 | `/anki:exam-prep` | a whole course into a prioritised deck |
 | `/anki:check-setup` | check Anki, AnkiConnect, Graphviz |
 
-Claude picks the skill itself. The slash commands force one.
+Claude picks the skill itself. The slash commands force one, and `/anki:exam-prep` only runs that
+way.
 
 ## Tools
 
@@ -118,41 +129,30 @@ Draft tools only touch drafts and pictures. Only the last six write to your coll
 | `draft_commit`, `update_notes`, `delete_notes`, `undo`, `math_css`, `sync` | write |
 
 It never adds unapproved cards, deletes notes it didn't create, or opens anything except images
-and PDFs. Edits to foreign notes need your OK.
+and PDFs. Edits to your own notes need your OK.
 
 ## Privacy
 
 Everything runs on your machine, nothing goes to me. It talks to AnkiConnect on `127.0.0.1`.
-Drafts and the undo journal live in `~/.anki-mcp`, pictures in `~/Pictures/Anki for Claude`. Only
-when you ask: a video id goes to YouTube, an image URL gets fetched, Anki syncs to AnkiWeb. Full
-version in [PRIVACY.md](PRIVACY.md).
+Drafts and the undo journal live in `~/.anki-mcp`, pictures in `~/Pictures/Anki MCP`. Only when you
+ask: a video id goes to YouTube, an image URL gets fetched, Anki syncs to AnkiWeb. Full version in
+[PRIVACY.md](PRIVACY.md).
 
 ## Known limits
 
-- An open dialog in Anki blocks AnkiConnect until you close it.
+- No Windows yet.
 - Claude Code and Cowork only. A plain chat can't reach a local server.
-- Anki only auto-starts on macOS. No Windows yet.
+- An open dialog in Anki blocks AnkiConnect until you close it.
+- Anki starts on its own on macOS, and on Linux if the `anki` command exists.
 - Near-duplicates are flagged, not blocked, and only against the newest 1500 notes of a deck.
-- Deleting can't be undone. Fix the card instead.
+- Undoing a delete brings the card back, not its review history. Fix wrong cards instead.
 - Image occlusion is rectangles only.
 
+## Contributing
 
-## Development
-
-```bash
-uv sync
-uv run pytest                                   # against a fake AnkiConnect, no Anki needed
-ANKI_LIVE=1 uv run pytest tests/test_live_anki.py   # read-only smoke test against real Anki
-claude --plugin-dir .                           # try it in Claude Code
-claude plugin eval .                            # with vs. without the plugin, mocked tools
-```
-
-After changing dependencies, regenerate `requirements.txt` (the launcher installs from it
-without uv):
-
-```bash
-uv export --frozen --no-dev --no-emit-project --format requirements-txt --quiet > requirements.txt
-```
+Bug reports and ideas are welcome as [issues](https://github.com/MichaelPrutkow/anki-mcp/issues).
+How to run the tests and the evals is in [CONTRIBUTING.md](CONTRIBUTING.md), changes per version in
+[CHANGELOG.md](CHANGELOG.md).
 
 ## Credits
 

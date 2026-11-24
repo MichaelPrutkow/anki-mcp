@@ -1,7 +1,7 @@
 [project]
-name = "anki-for-claude"
-version = "2.2.0"
-description = "Claude plugin and MCP server for creating and maintaining Anki flashcards"
+name = "anki-mcp"
+version = "3.0.0"
+description = "MCP server and Claude plugin that writes and fixes Anki cards, with pictures and image occlusion"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -20,6 +20,8 @@ keywords = ["anki", "mcp", "flashcards", "spaced-repetition", "model-context-pro
 classifiers = [
     "Programming Language :: Python :: 3",
     "Intended Audience :: End Users/Desktop",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
     "Topic :: Education",
 ]
 
@@ -29,8 +31,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/MichaelPrutkow/anki-for-claude"
-Issues = "https://github.com/MichaelPrutkow/anki-for-claude/issues"
+Homepage = "https://github.com/MichaelPrutkow/anki-mcp"
+Issues = "https://github.com/MichaelPrutkow/anki-mcp/issues"
+Changelog = "https://github.com/MichaelPrutkow/anki-mcp/blob/main/CHANGELOG.md"
 
 [project.scripts]
 anki-mcp = "anki_mcp:main"

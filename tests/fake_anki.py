@@ -122,7 +122,8 @@ class FakeAnki:
         return nid
 
     def notesInfo(self, notes: list[int]) -> list[dict[str, Any]]:
-        return [json.loads(json.dumps(self.notes[n])) if n in self.notes else {} for n in notes]
+        # Every note has one card, with the note's id as card id.
+        return [json.loads(json.dumps({**self.notes[n], "cards": [n]})) if n in self.notes else {} for n in notes]
 
     def updateNoteFields(self, note: dict[str, Any]) -> None:
         stored = self.notes[note["id"]]
@@ -166,7 +167,18 @@ class FakeAnki:
 
     def cardsInfo(self, cards: list[int]) -> list[dict[str, Any]]:
         fields = {"Front": {"value": "Frage", "order": 0}, "Back": {"value": "Antwort", "order": 1}}
-        return [{"cardId": c, "note": c, "ord": 0, "lapses": 1, "modelName": "Basic", "fields": fields} for c in cards]
+        return [
+            {
+                "cardId": c,
+                "note": c,
+                "deckName": self.notes[c]["deck"] if c in self.notes else "Default",
+                "ord": 0,
+                "lapses": 1,
+                "modelName": "Basic",
+                "fields": fields,
+            }
+            for c in cards
+        ]
 
     def getReviewsOfCards(self, cards: list[int]) -> dict[str, list[dict[str, Any]]]:
         return {}

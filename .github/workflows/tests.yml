@@ -1,0 +1,30 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install Graphviz
+        run: ${{ runner.os == 'macOS' && 'brew install graphviz' || 'sudo apt-get update && sudo apt-get install -y graphviz' }}
+      - name: Lint
+        run: |
+          uvx ruff check src tests
+          uvx ruff format --check src tests
+      - name: Test
+        run: uv run --frozen pytest
+      - name: Launcher
+        run: sh -n scripts/start-server.sh

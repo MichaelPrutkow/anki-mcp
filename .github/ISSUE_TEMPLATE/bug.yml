@@ -1,0 +1,25 @@
+name: Bug
+description: Something does not work as described.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you asked Claude, what you expected and what happened instead. The exact error message helps most.
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Setup check
+      description: Say "check my Anki setup" to Claude and paste its checklist here.
+      render: text
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Plugin version, Anki version, operating system, and Claude Code or the desktop app.
+      placeholder: "3.0.0, Anki 25.09, macOS 26, Claude desktop app"
+    validations:
+      required: true
