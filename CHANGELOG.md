@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.1.0 (2026-11-24)
+
+Changes for the Anthropic plugin directory.
+
+- The plugin starts its server with `python3` and `server.py` instead of a shell script. On macOS this
+  needs Apple's Command Line Tools, which most people already have for git.
+- AnkiConnect's `apiKey` is no longer supported, and `ANKI_CONNECT_API_KEY` is gone. An `apiKey` set in
+  AnkiConnect gets an error message that says how to clear it.
+- The script that lists MathJax's macros moved from `scripts/` into CONTRIBUTING.md.
+- `plugin.json` names the icon for the directory listing.
+
 ## 3.0.2 (2026-11-24)
 
 - When you ask Claude to fix one of your own notes, it changes it right away and tells you how to undo

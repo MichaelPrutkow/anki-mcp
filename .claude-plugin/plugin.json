@@ -1,7 +1,7 @@
 {
   "name": "anki",
   "displayName": "Anki MCP",
-  "version": "3.0.2",
+  "version": "3.1.0",
   "description": "Anki cards from your slides, PDFs and videos, with real pictures: graphs, PDF figures, plots and image occlusion. Finds and fixes the cards you keep failing. Nothing reaches your collection until you say so. Unofficial, not affiliated with Ankitects.",
   "author": {
     "name": "Michael Prutkow",
@@ -9,6 +9,7 @@
     "url": "https://prutkow.com"
   },
   "license": "MIT",
+  "icon": "./.claude-plugin/icon.png",
   "keywords": [
     "anki",
     "flashcards",
@@ -23,9 +24,9 @@
   "privacyPolicyUrl": "https://prutkow.com/anki-mcp/privacy/",
   "mcpServers": {
     "anki": {
-      "command": "/bin/sh",
+      "command": "python3",
       "args": [
-        "${CLAUDE_PLUGIN_ROOT}/scripts/start-server.sh"
+        "${CLAUDE_PLUGIN_ROOT}/server.py"
       ]
     }
   }

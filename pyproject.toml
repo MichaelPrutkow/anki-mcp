@@ -1,6 +1,6 @@
 [project]
 name = "anki-mcp"
-version = "3.0.2"
+version = "3.1.0"
 description = "MCP server and Claude plugin that writes and fixes Anki cards, with pictures and image occlusion"
 readme = "README.md"
 license = "MIT"

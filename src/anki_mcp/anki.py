@@ -24,10 +24,9 @@ class AnkiTimeout(AnkiError):
 
 
 class AnkiClient:
-    def __init__(self, http: httpx.AsyncClient, url: str, api_key: str | None = None):
+    def __init__(self, http: httpx.AsyncClient, url: str):
         self._http = http
         self._url = url
-        self._key = api_key  # AnkiConnect's optional apiKey setting
         self._launch_lock = asyncio.Lock()
 
     async def invoke(self, action: str, *, timeout: float = 30.0, **params: Any) -> Any:
@@ -36,7 +35,7 @@ class AnkiClient:
 
     async def multi(self, calls: list[tuple[str, dict[str, Any]]], *, timeout: float = 50.0) -> list[Any]:
         """Several actions in one request. Failed actions come back as AnkiError instead of raising."""
-        actions = [self._with_key({"action": a, "version": API_VERSION, "params": p}) for a, p in calls]
+        actions = [{"action": a, "version": API_VERSION, "params": p} for a, p in calls]
         results = await self.invoke("multi", timeout=timeout, actions=actions)
         out: list[Any] = []
         for (action, _), item in zip(calls, results, strict=True):
@@ -53,12 +52,9 @@ class AnkiClient:
             await self._ensure_running()
             return await self._send(payload, timeout)
 
-    def _with_key(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return {**payload, "key": self._key} if self._key else payload
-
     async def _send(self, payload: dict[str, Any], timeout: float) -> Any:
         try:
-            response = await self._http.post(self._url, json=self._with_key(payload), timeout=timeout)
+            response = await self._http.post(self._url, json=payload, timeout=timeout)
         except httpx.TimeoutException:
             raise AnkiTimeout(
                 "Anki did not answer in time. Usually a dialog window is open in Anki: ask the user to close it."
@@ -135,9 +131,8 @@ def _unwrap(action: str, body: Any) -> Any:
     if body["error"] is not None:
         if "api key" in str(body["error"]).lower():
             raise AnkiError(
-                f"{action}: AnkiConnect needs an API key. Set the environment variable ANKI_CONNECT_API_KEY to the "
-                "apiKey in AnkiConnect's settings (in Anki: Tools > Add-ons > AnkiConnect > Config), then restart "
-                "Claude."
+                f"{action}: AnkiConnect is set up to require an API key, which this plugin does not use. Ask the user "
+                "to clear apiKey in Anki under Tools > Add-ons > AnkiConnect > Config and restart Anki."
             )
         raise AnkiError(f"{action}: {body['error']}")
     return body["result"]

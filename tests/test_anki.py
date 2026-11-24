@@ -19,19 +19,9 @@ def answering(seen: list[dict[str, Any]], error: str | None = None) -> httpx.Moc
     return httpx.MockTransport(handle)
 
 
-async def test_the_api_key_goes_with_every_action() -> None:
-    seen: list[dict[str, Any]] = []
-    async with httpx.AsyncClient(transport=answering(seen)) as http:
-        client = AnkiClient(http, "http://127.0.0.1:8765", api_key="secret")
-        await client.invoke("version")
-        await client.invoke("multi", actions=[client._with_key({"action": "version", "version": 6})])
-    assert all(body["key"] == "secret" for body in seen)
-    assert seen[1]["params"]["actions"][0]["key"] == "secret"
-
-
 async def test_a_missing_api_key_explains_the_fix() -> None:
     async with httpx.AsyncClient(transport=answering([], error="valid api key must be provided")) as http:
-        with pytest.raises(AnkiError, match="ANKI_CONNECT_API_KEY"):
+        with pytest.raises(AnkiError, match="clear apiKey"):
             await AnkiClient(http, "http://127.0.0.1:8765").invoke("deckNames")
 
 

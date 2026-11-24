@@ -22,9 +22,7 @@ jobs:
         run: ${{ runner.os == 'macOS' && 'brew install graphviz' || 'sudo apt-get update && sudo apt-get install -y graphviz' }}
       - name: Lint
         run: |
-          uvx ruff check src tests
-          uvx ruff format --check src tests
+          uvx ruff check src tests server.py
+          uvx ruff format --check src tests server.py
       - name: Test
         run: uv run --frozen pytest
-      - name: Launcher
-        run: sh -n scripts/start-server.sh

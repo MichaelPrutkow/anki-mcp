@@ -86,11 +86,7 @@ async def lifespan(server: MCPServer) -> AsyncGenerator[App, None]:
     if old_pictures.is_dir() and not pictures.exists():
         old_pictures.rename(pictures)
     async with httpx.AsyncClient(timeout=30.0) as http:
-        anki = AnkiClient(
-            http,
-            os.environ.get("ANKI_CONNECT_URL") or DEFAULT_ANKI_CONNECT_URL,
-            os.environ.get("ANKI_CONNECT_API_KEY") or None,
-        )
+        anki = AnkiClient(http, os.environ.get("ANKI_CONNECT_URL") or DEFAULT_ANKI_CONNECT_URL)
         yield App(
             anki=anki,
             note_types=NoteTypes(anki),
@@ -128,7 +124,7 @@ def _version() -> str:
     try:
         return version("anki-mcp")
     except PackageNotFoundError:
-        # Started from the source folder with Anki's Python (scripts/start-server.sh), not installed by uv.
+        # Started from the source folder by server.py with Anki's Python, not installed by uv.
         with (Path(__file__).parents[2] / "pyproject.toml").open("rb") as f:
             return tomllib.load(f)["project"]["version"]
 

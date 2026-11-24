@@ -54,6 +54,9 @@ You need macOS or Linux, Anki with [AnkiConnect](https://ankiweb.net/shared/info
 needs nothing else. On older versions (23.10+) install [uv](https://docs.astral.sh/uv/).
 [Graphviz](https://graphviz.org/download/) is optional, only for graphs.
 
+The plugin starts with `python3`. Linux has it. On macOS it comes with Apple's Command Line Tools:
+if `git` works in Terminal, you have them, otherwise run `xcode-select --install` once.
+
 Add my marketplace, [`MichaelPrutkow/anki-mcp`](https://github.com/MichaelPrutkow/anki-mcp), and
 install the plugin from it.
 
@@ -94,12 +97,9 @@ cd anki-mcp && uv sync --no-dev
 
 ## Settings
 
-Most setups need none. Both are environment variables of the server:
-
-| Variable | For |
-| --- | --- |
-| `ANKI_CONNECT_URL` | AnkiConnect on another address than `http://127.0.0.1:8765` |
-| `ANKI_CONNECT_API_KEY` | the `apiKey` you set in AnkiConnect's config |
+None needed. If AnkiConnect listens on another address than `http://127.0.0.1:8765`, set the
+environment variable `ANKI_CONNECT_URL`. An `apiKey` in AnkiConnect's config is not supported: leave it
+empty.
 
 ## Usage
 
