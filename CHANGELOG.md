@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.0.1 (2026-11-24)
+
+- Fixed: in the first five minutes after the computer started, `overview` listed no note types and
+  `draft_add` rejected every note type.
+
 ## 3.0.0 (2026-11-24)
 
 The project is now called **Anki MCP**, and the repository moved to

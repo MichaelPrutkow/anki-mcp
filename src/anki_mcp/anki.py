@@ -193,15 +193,20 @@ class NoteTypes:
     def __init__(self, anki: AnkiClient):
         self._anki = anki
         self._cache: dict[str, NoteType] = {}
-        self._loaded_at = 0.0
+        # None until the first load. Not 0.0: time.monotonic() counts from boot, so in the first five minutes after
+        # starting the computer a cache "loaded at 0.0" would look fresh and never load.
+        self._loaded_at: float | None = None
+
+    def _stale(self) -> bool:
+        return self._loaded_at is None or time.monotonic() - self._loaded_at > 300
 
     async def all(self) -> list[NoteType]:
-        if time.monotonic() - self._loaded_at > 300:
+        if self._stale():
             await self._reload()
         return list(self._cache.values())
 
     async def get(self, name: str) -> NoteType:
-        if name not in self._cache or time.monotonic() - self._loaded_at > 300:
+        if name not in self._cache or self._stale():
             await self._reload()
         if name not in self._cache:
             raise AnkiError(f"Note type '{name}' does not exist. Available: {', '.join(sorted(self._cache))}")

@@ -66,3 +66,16 @@ async def test_anki_is_started_on_linux(monkeypatch: pytest.MonkeyPatch) -> None
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
         assert await AnkiClient(http, "http://127.0.0.1:8765").invoke("deckNames") == ["Default"]
     assert started == ["/usr/bin/anki"]
+
+
+async def test_note_types_load_right_after_the_computer_starts(monkeypatch: pytest.MonkeyPatch) -> None:
+    def handle(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        models = [{"name": "Basic", "type": 0, "flds": [{"name": "Front", "ord": 0}, {"name": "Back", "ord": 1}]}]
+        result = ["Basic"] if body["action"] == "modelNames" else models
+        return httpx.Response(200, json={"result": result, "error": None})
+
+    monkeypatch.setattr(anki_module.time, "monotonic", lambda: 12.0)  # twelve seconds since boot, like a CI runner
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        note_types = anki_module.NoteTypes(AnkiClient(http, "http://127.0.0.1:8765"))
+        assert [nt.name for nt in await note_types.all()] == ["Basic"]

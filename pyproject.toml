@@ -1,6 +1,6 @@
 [project]
 name = "anki-mcp"
-version = "3.0.0"
+version = "3.0.1"
 description = "MCP server and Claude plugin that writes and fixes Anki cards, with pictures and image occlusion"
 readme = "README.md"
 license = "MIT"
@@ -39,7 +39,7 @@ Changelog = "https://github.com/MichaelPrutkow/anki-mcp/blob/main/CHANGELOG.md"
 anki-mcp = "anki_mcp:main"
 
 [build-system]
-requires = ["uv_build>=0.12.5,<0.13.0"]
+requires = ["uv_build>=0.12.5,<0.14.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
