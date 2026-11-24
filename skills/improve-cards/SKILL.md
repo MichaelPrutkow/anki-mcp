@@ -68,7 +68,7 @@ No hits usually means the query is malformed, not that nothing matches.
 
 ## Deleting
 
-Delete a card only when it should not exist at all, and ask the user first. `delete_notes` removes only notes this plugin created, and their review history is lost for good. Its batch id brings the content back with `undo`, but not the history.
+Delete a card only when it should not exist at all, and ask the user first. `delete_notes` removes only notes this plugin created, and their review history is lost for good. Their client also asks them in a dialog, and so does `undo` with `force=true` before it deletes studied cards. If they decline there, nothing was deleted: leave it unless they ask again. Its batch id brings the content back with `undo`, but not the history.
 
 ## Undoing
 

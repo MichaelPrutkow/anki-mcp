@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 from fake_anki import FakeAnki
+from mcp import types
 from mcp.client import Client
 from PIL import Image, ImageDraw
 
@@ -461,3 +462,67 @@ async def test_the_old_pictures_folder_is_taken_over(anki: FakeAnki, tmp_path: P
         await client.list_tools()
     assert (tmp_path / IMAGES / "herz.png").read_bytes() == b"png"
     assert not old.exists()
+
+
+# 2026-07-28 answers with input_required and the client calls again; before it, the server asks the client directly.
+BOTH_PROTOCOLS = pytest.mark.parametrize("mode", ["auto", "legacy"])
+
+
+class Dialog:
+    """A client's confirmation dialog: answers with the queued actions and records the messages."""
+
+    def __init__(self, *answers: tuple[str, bool]) -> None:
+        self.answers = list(answers)
+        self.messages: list[str] = []
+
+    async def __call__(self, context: Any, params: types.ElicitRequestParams) -> types.ElicitResult:
+        self.messages.append(params.message)
+        action, dont_ask_again = self.answers.pop(0)
+        content = {"dont_ask_again": dont_ask_again} if action == "accept" else None
+        return types.ElicitResult(action=action, content=content)
+
+
+@BOTH_PROTOCOLS
+async def test_commit_asks_in_a_dialog_unless_told_not_to(anki: FakeAnki, mode: str) -> None:
+    dialog = Dialog(("decline", False), ("accept", False))
+    async with Client(mcp, elicitation_callback=dialog, mode=mode) as client:
+        draft = draft_id(await call(client, "draft_add", cards=[BASIC, CLOZE], deck="Math", note_type="Basic"))
+        assert "did not confirm" in await fails(client, "draft_commit", draft_id=draft)
+        assert not anki.notes and "2 cards" in await call(client, "draft_show", draft_id=draft)
+        await call(client, "draft_commit", draft_id=draft, cards=[1])
+        await call(client, "draft_commit", draft_id=draft, confirm=False)
+    assert len(anki.notes) == 2 and not dialog.answers
+    assert dialog.messages[1].startswith(f"Add 1 card from draft {draft} to Anki (deck Math)?")
+
+
+@BOTH_PROTOCOLS
+async def test_delete_asks_until_the_user_says_not_again(anki: FakeAnki, mode: str) -> None:
+    dialog = Dialog(("cancel", False), ("accept", True))
+    async with Client(mcp, elicitation_callback=dialog, mode=mode) as client:
+        cards = [{"fields": {"Front": f"<b>Frage</b> {i}", "Back": "a"}} for i in range(7)]
+        text = await call(client, "draft_add", cards=cards, deck="Math", note_type="Basic")
+        await call(client, "draft_commit", draft_id=draft_id(text), confirm=False)
+        first, *rest = sorted(anki.notes)
+        assert "nothing was changed" in await fails(client, "delete_notes", note_ids=sorted(anki.notes))
+        assert len(anki.notes) == 7
+        await call(client, "delete_notes", note_ids=rest)
+        await call(client, "delete_notes", note_ids=[first])  # no dialog any more
+    assert not anki.notes and not dialog.answers
+    assert "- Frage 0\n" in dialog.messages[0] and "and 2 more" in dialog.messages[0]
+
+
+@BOTH_PROTOCOLS
+async def test_force_undo_asks_only_for_studied_cards(anki: FakeAnki, mode: str) -> None:
+    dialog = Dialog(("decline", False), ("accept", False))
+    async with Client(mcp, elicitation_callback=dialog, mode=mode) as client:
+        text = await call(client, "draft_add", cards=[BASIC, CLOZE], deck="Math", note_type="Basic")
+        batch = batch_id(await call(client, "draft_commit", draft_id=draft_id(text), confirm=False))
+        studied, _ = sorted(anki.notes)
+        anki.notes[studied]["studied"] = True
+        assert "deleted 1 note" in await call(client, "undo", batch_id=batch)
+        assert list(anki.notes) == [studied] and dialog.messages == []  # nothing studied was deleted, no dialog
+
+        await fails(client, "undo", batch_id=batch, force=True)
+        assert studied in anki.notes
+        assert "deleted 1 note" in await call(client, "undo", batch_id=batch, force=True)
+    assert not anki.notes and dialog.messages[0].startswith("Delete 1 card you studied")

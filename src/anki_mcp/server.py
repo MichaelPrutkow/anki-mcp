@@ -5,15 +5,27 @@ import os
 import tomllib
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
 from mcp.server import MCPServer
+from mcp.server.elicitation import render_elicitation_schema
 from mcp.server.mcpserver import Context
-from mcp.types import Tool, ToolAnnotations
+from mcp.server.mcpserver.exceptions import ToolError
+from mcp.shared.exceptions import MCPError
+from mcp.types import (
+    INTERNAL_ERROR,
+    CallToolResult,
+    ElicitRequest,
+    ElicitRequestFormParams,
+    InputRequiredResult,
+    Tool,
+    ToolAnnotations,
+)
+from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from anki_mcp.anki import AnkiClient, NoteTypes
@@ -63,6 +75,7 @@ class App:
     drafts: DraftStore
     journal: Journal
     images: ImageStore
+    no_dialog: set[str] = field(default_factory=set)  # kinds of change the user said not to be asked about again
 
 
 Ctx = Context[App]
@@ -70,6 +83,61 @@ Ctx = Context[App]
 
 def app(ctx: Ctx) -> App:
     return ctx.request_context.lifespan_context
+
+
+class Confirmation(BaseModel):
+    dont_ask_again: bool = Field(default=False, title="Don't ask again in this session")
+
+
+def _can_ask(ctx: Ctx) -> bool:
+    caps = ctx.request_context.session.client_capabilities
+    elicitation = caps.elicitation if caps else None
+    # A bare "elicitation: {}" from clients before 2025-11-25 means form mode.
+    return elicitation is not None and (elicitation.form is not None or elicitation.url is None)
+
+
+class _AskFirst(MCPError):
+    """Ends the tool call with an InputRequiredResult: the client shows the dialog and calls the tool again."""
+
+    def __init__(self, result: InputRequiredResult):
+        super().__init__(INTERNAL_ERROR, "confirmation dialog")
+        self.result = result
+
+
+async def confirm(ctx: Ctx, kind: str, message: str) -> None:
+    """Ask the user in a dialog of their client before a change; raise ToolError unless they accept.
+
+    The server cannot see the chat, so this is the one approval that does not depend on the model. Clients
+    without form elicitation show no dialog, and neither does a kind the user ticked "don't ask again" for.
+    Call it before the first change of a tool call: from protocol 2026-07-28 on, the call ends here and the
+    client calls the tool again with the user's answer, so everything before it runs twice.
+    """
+    a = app(ctx)
+    if kind in a.no_dialog or not _can_ask(ctx):
+        return
+    if ctx.request_context.session.can_send_request:  # before 2026-07-28: the server asks the client directly
+        try:
+            result = await ctx.elicit(message, Confirmation)
+        except Exception as e:  # the client failed to show it: better nothing changes than a change nobody saw
+            raise ToolError(f"The confirmation dialog could not be shown ({e}). Nothing was changed.") from e
+        accepted = result.data if result.action == "accept" else None
+    else:
+        response = (ctx.input_responses or {}).get(kind)
+        if response is None:
+            params = ElicitRequestFormParams(message=message, requested_schema=render_elicitation_schema(Confirmation))
+            raise _AskFirst(InputRequiredResult(input_requests={kind: ElicitRequest(params=params)}))
+        accepted = (
+            Confirmation.model_validate(response.content or {})
+            if getattr(response, "action", None) == "accept"
+            else None
+        )
+    if accepted is None:
+        raise ToolError(
+            "The user did not confirm in the dialog, so nothing was changed. Do not call this again unless the "
+            "user asks for it."
+        )
+    if accepted.dont_ask_again:
+        a.no_dialog.add(kind)
 
 
 @asynccontextmanager
@@ -118,6 +186,14 @@ class AnkiServer(MCPServer):
         # The Claude desktop app passes only "properties" and "required" of a tool schema on to chats,
         # so a $ref into "$defs" would point nowhere there.
         return [t.model_copy(update={"input_schema": inline_refs(t.input_schema)}) for t in await super().list_tools()]
+
+    async def call_tool(
+        self, name: str, arguments: dict[str, Any], context: Context[App, Any] | None = None
+    ) -> CallToolResult | InputRequiredResult:
+        try:
+            return await super().call_tool(name, arguments, context)
+        except _AskFirst as ask:
+            return ask.result
 
 
 def _version() -> str:

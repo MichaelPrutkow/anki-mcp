@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.2.0 (2026-11-24)
+
+- Confirmation dialogs (MCP elicitation). Before `draft_commit` adds cards, `delete_notes` deletes
+  notes or `undo` with `force=true` deletes studied cards, the server asks you in a dialog of your
+  client, so the approval no longer depends on Claude alone. "Don't ask again in this session" turns
+  it off until the server restarts, separately for adding and for deleting.
+- `draft_commit` has a `confirm` parameter. Claude sets it to `false` when you said to commit
+  directly, so that still runs without any question. Deleting has no such switch.
+- Clients without elicitation work as before. Both the 2026-07-28 protocol and older ones are
+  supported.
+
 ## 3.1.0 (2026-11-24)
 
 Changes for the Anthropic plugin directory.

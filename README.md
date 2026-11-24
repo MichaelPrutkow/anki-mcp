@@ -40,7 +40,9 @@ https://github.com/user-attachments/assets/00ac5217-9e81-4b8c-8479-c9aa38729dc4
   follows [Signs of AI writing](https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing), so
   the cards don't read like a chatbot.
 - **You approve everything.** Claude shows every card first. Change what you want, then it adds
-  them. Say "commit directly" to skip that.
+  them. Say "commit directly" to skip that. Where your client can show a dialog, like Claude Code,
+  the server asks you itself before cards go in and before anything with review history is
+  deleted. Tick "Don't ask again in this session" to stop it.
 - **Fixes cards you keep failing.** It ranks your cards by again rate, lapses, FSRS difficulty and
   leeches, figures out why they fail and rewrites them. Review history stays.
 - **Whole courses.** `/anki:exam-prep` takes slides, exercise sheets and past exams and builds a

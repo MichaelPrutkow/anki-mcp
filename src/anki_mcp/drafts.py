@@ -22,6 +22,7 @@ from anki_mcp.anki import AnkiError, NoteType, deck_query, similar_decks
 from anki_mcp.images import downscale, local_images, png_bytes, replace_images, upload_images
 from anki_mcp.occlusion import Mask, build_field, draw_masks, find_label, parse_field
 from anki_mcp.server import ADDS, BATCH_PREFIX, CREATED_TAG, DRAFT, READ_ONLY, App, Ctx, app, tool
+from anki_mcp.server import confirm as ask  # draft_commit has a parameter called confirm
 from anki_mcp.stats import content_flags
 from anki_mcp.text import cloze_ords, comparable, line_breaks_to_html, lint, readable, repair, strip_html, truncate
 
@@ -872,6 +873,13 @@ async def draft_commit(
     cards: Annotated[
         list[int] | None, Field(min_length=1, description="Only these card numbers. Without it: all cards")
     ] = None,
+    confirm: Annotated[
+        bool,
+        Field(
+            description="false only when the user said to add the cards without asking, e.g. 'commit them "
+            "directly'. Otherwise their client asks them once more in a dialog"
+        ),
+    ] = True,
 ) -> str:
     """Add the cards the user approved to Anki. Missing decks are created. Returns a batch id for undo.
 
@@ -885,6 +893,14 @@ async def draft_commit(
         if missing:
             raise ToolError(f"Draft {draft_id} has no card {_numbers(missing)}.")
         selected = [card for card in draft.cards if card.n in wanted]
+        if confirm:
+            decks = ", ".join(sorted({card.deck for card in selected}))
+            await ask(
+                ctx,
+                "commit",
+                f"Add {_count(len(selected), 'card')} from draft {draft_id} to Anki (deck {decks})? "
+                "undo removes them again.",
+            )
 
         decks = set(await a.anki.invoke("deckNames"))
         for deck in sorted({card.deck for card in selected} - decks):

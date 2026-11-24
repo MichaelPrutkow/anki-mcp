@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from anki_mcp.anki import AnkiError, AnkiTimeout, similar_decks
 from anki_mcp.images import dot_command, local_images, replace_images, upload_images
-from anki_mcp.server import BATCH_PREFIX, CREATED_TAG, OVERWRITES, READ_ONLY, STYLES, SYNC, App, Ctx, app, tool
+from anki_mcp.server import BATCH_PREFIX, CREATED_TAG, OVERWRITES, READ_ONLY, STYLES, SYNC, App, Ctx, app, confirm, tool
 from anki_mcp.text import lint, repair, strip_html, to_markdown, truncate
 
 MAX_EXPORT = 2000
@@ -290,8 +290,9 @@ async def delete_notes(
 ) -> str:
     """Delete notes created by this plugin. Their review history is lost for good.
 
-    Only for cards that should not exist at all; fix wrong cards with update_notes instead. Returns a batch id:
-    undo adds the notes back with their fields, tags and deck, but without the review history.
+    Only for cards that should not exist at all; fix wrong cards with update_notes instead. The user confirms in a
+    dialog where their client can show one. Returns a batch id: undo adds the notes back with their fields, tags and
+    deck, but without the review history.
     """
     a = app(ctx)
     infos = await a.anki.invoke("notesInfo", notes=note_ids)
@@ -308,6 +309,15 @@ async def delete_notes(
     first_cards = [info["cards"][0] if info.get("cards") else None for info in infos]
     card_infos = await a.anki.invoke("cardsInfo", cards=[c for c in first_cards if c is not None])
     deck_of = {card["cardId"]: card["deckName"] for card in card_infos if card}
+    shown = [_first_field(info) for info in infos[:MAX_SHOWN]]
+    if len(infos) > MAX_SHOWN:
+        shown.append(f"and {len(infos) - MAX_SHOWN} more")
+    await confirm(
+        ctx,
+        "delete",
+        f"Delete {_count(len(note_ids), 'note')} from Anki? Their review history is lost for good; undo brings back "
+        "only the content.\n" + "\n".join(f"- {line}" for line in shown),
+    )
     deleted = [
         {
             "note_id": info["noteId"],
@@ -327,19 +337,36 @@ async def delete_notes(
     )
 
 
-async def _undo_commit(a: App, batch_id: str, force: bool, known: bool) -> tuple[str, list[int]]:
+MAX_SHOWN = 5  # notes named in a confirmation dialog
+
+
+def _first_field(info: dict[str, Any]) -> str:
+    fields = sorted(info["fields"].values(), key=lambda field: field["order"])
+    return truncate(strip_html(fields[0]["value"]), 80) if fields else str(info["noteId"])
+
+
+async def _undo_commit(ctx: Ctx, batch_id: str, force: bool, known: bool) -> tuple[str, list[int]]:
     """Delete the notes of a commit, except those the user studied or edited since (unless forced)."""
+    a = app(ctx)
     batch = f"tag:{BATCH_PREFIX}{batch_id}"
     ids = await a.anki.invoke("findNotes", query=batch)
     if not ids and not known:
         raise ToolError(f"There is no batch '{batch_id}'.")
     kept: list[int] = []
-    if ids and not force:
+    if ids:
         studied = set(await a.anki.invoke("findNotes", query=f"{batch} -is:new"))
         # A note id is the time the note was added, in milliseconds; mod is the time of its last change, in seconds.
         infos = await a.anki.invoke("notesInfo", notes=ids)
         edited = {info["noteId"] for info in infos if info and info["mod"] > info["noteId"] // 1000 + EDIT_SLACK}
         kept = sorted(studied | edited)
+        if force and kept:
+            await confirm(
+                ctx,
+                "delete",
+                f"Delete {_count(len(kept), 'card')} you studied or edited since batch {batch_id} was added? "
+                "Their review history is lost for good.",
+            )
+            kept = []
     delete = [nid for nid in ids if nid not in kept]
     if delete:
         await a.anki.invoke("deleteNotes", notes=delete)
@@ -416,7 +443,8 @@ async def undo(
     """Revert a draft_commit, update_notes, delete_notes or math_css by its batch id: added notes are deleted,
     changed fields and styling restored, deleted notes added back without their review history.
 
-    Notes the user studied or edited since are left alone and listed.
+    Notes the user studied or edited since are left alone and listed. With force=true the user confirms deleting
+    them in a dialog where their client can show one.
     """
     a = app(ctx)
     entries = a.journal.entries()
@@ -431,7 +459,7 @@ async def undo(
 
     kept: list[int] = []
     if is_commit:
-        message, kept = await _undo_commit(a, batch_id, force, known=entry is not None or bool(undone))
+        message, kept = await _undo_commit(ctx, batch_id, force, known=entry is not None or bool(undone))
     elif entry["kind"] == "styling":
         message = await _undo_styling(a, batch_id, entry)
     elif entry["kind"] == "delete":
