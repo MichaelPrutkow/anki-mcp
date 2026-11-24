@@ -1,5 +1,5 @@
 ---
-description: A note the user wrote is only changed after they agree; the fix is proposed first.
+description: When the user asks to fix one of their own notes, it is changed right away with force, and the reply says so and names the batch id.
 max_turns: 15
 allowed_tools: [Skill]
 ---

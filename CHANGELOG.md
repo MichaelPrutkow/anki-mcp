@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.0.2 (2026-11-24)
+
+- When you ask Claude to fix one of your own notes, it changes it right away and tells you how to undo
+  it. Fixes it finds on its own, for example in your review statistics, still wait for your OK.
+- Evals for both cases.
+
 ## 3.0.1 (2026-11-24)
 
 - Fixed: in the first five minutes after the computer started, `overview` listed no note types and

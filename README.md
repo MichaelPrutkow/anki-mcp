@@ -129,7 +129,7 @@ Draft tools only touch drafts and pictures. Only the last six write to your coll
 | `draft_commit`, `update_notes`, `delete_notes`, `undo`, `math_css`, `sync` | write |
 
 It never adds unapproved cards, deletes notes it didn't create, or opens anything except images
-and PDFs. Edits to your own notes need your OK.
+and PDFs. It changes your own notes only when you ask for that change or agree to its proposal.
 
 ## Privacy
 

@@ -60,7 +60,9 @@ No hits usually means the query is malformed, not that nothing matches.
 
 - `update_notes` changes fields and keeps the review history. Prefer it to deleting and adding a new card.
 - Send only the fields that change, each with its full new content. Like `draft_add`, it repairs LaTeX that lost a backslash in JSON and lists formatting problems.
-- Notes without the tag `mcp::created` were written by the user. Ask before changing them, then call `update_notes` again with `force=true`.
+- Notes without the tag `mcp::created` were written by the user, and `update_notes` needs `force=true` for them.
+  - If the user asked you to fix this particular note ("in my card on eigenvalues the sign is wrong, fix it"), that request is their OK: change it with `force=true` right away. In the report, show the new text, say that it was their own note, and give the batch id for `undo`.
+  - Changes you come up with yourself, for example after `stats` or during a cleanup, need the user's OK first: propose them and wait, as in "Finding the cards that do not work".
 - The formatting rules of the `create-cards` skill apply to every field you write.
 - To add a picture to an existing card, make it with the tools from the `visuals` skill and put its `<img>` tag into the field.
 

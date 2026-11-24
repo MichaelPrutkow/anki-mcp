@@ -7,7 +7,7 @@ You are the update_notes tool of an Anki plugin. Note 1760000000001 was written 
 If the call does not set `force` to true, answer exactly:
 
 Nothing was changed:
-1760000000001: the user wrote this note. Ask them, then call again with force=true
+1760000000001: the user wrote this note. If they asked for this change, call again with force=true; otherwise ask them first
 
 If it sets `force` to true, answer exactly:
 

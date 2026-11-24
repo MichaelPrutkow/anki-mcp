@@ -246,7 +246,7 @@
   {
    "name": "update_notes",
    "title": "Update notes",
-   "description": "Change fields of existing notes. Keeps the review history, so prefer it over deleting and re-adding.\n\nNotes not created by this plugin need force=true: ask the user first. Returns a batch id for undo.\n",
+   "description": "Change fields of existing notes. Keeps the review history, so prefer it over deleting and re-adding.\n\nNotes not created by this plugin need force=true: only for a change the user asked for, otherwise ask them\nfirst. Returns a batch id for undo.\n",
    "inputSchema": {
     "properties": {
      "updates": {
@@ -279,7 +279,7 @@
      },
      "force": {
       "default": false,
-      "description": "Needed for notes the user wrote. Ask the user first",
+      "description": "Needed for notes the user wrote: only for a change the user asked for",
       "title": "Force",
       "type": "boolean"
      }

@@ -193,11 +193,14 @@ class UpdateIn(BaseModel):
 async def update_notes(
     ctx: Ctx,
     updates: Annotated[list[UpdateIn], Field(min_length=1, max_length=50)],
-    force: Annotated[bool, Field(description="Needed for notes the user wrote. Ask the user first")] = False,
+    force: Annotated[
+        bool, Field(description="Needed for notes the user wrote: only for a change the user asked for")
+    ] = False,
 ) -> str:
     """Change fields of existing notes. Keeps the review history, so prefer it over deleting and re-adding.
 
-    Notes not created by this plugin need force=true: ask the user first. Returns a batch id for undo.
+    Notes not created by this plugin need force=true: only for a change the user asked for, otherwise ask them
+    first. Returns a batch id for undo.
     """
     a = app(ctx)
     infos = await a.anki.invoke("notesInfo", notes=[u.note_id for u in updates])
@@ -211,7 +214,10 @@ async def update_notes(
             errors.append(f"{update.note_id}: there is no such note")
             continue
         if CREATED_TAG not in info["tags"] and not force:
-            errors.append(f"{update.note_id}: the user wrote this note. Ask them, then call again with force=true")
+            errors.append(
+                f"{update.note_id}: the user wrote this note. If they asked for this change, call again with "
+                "force=true; otherwise ask them first"
+            )
             continue
         nt = await a.note_types.get(info["modelName"])
         fields, unknown = nt.normalize(update.fields)
